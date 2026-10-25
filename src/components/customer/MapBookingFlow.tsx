@@ -430,6 +430,22 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                   </div>
                 </div>
 
+                {/* Approximate fallback notice if road routing failed */}
+                {currentRoute?.source === 'fallback_estimate' && !isLoadingRoute && (
+                  <div className="flex items-center gap-1.5 px-1 text-[11px] text-amber-400/90">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>Approximate distance estimate (live road router unreachable)</span>
+                  </div>
+                )}
+
+                {/* Exceeds Limit Warning Banner (e.g. bicycle range or weight exceeded) */}
+                {selectedQuote.exceedsLimit && (
+                  <div className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-300">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
+                    <span>{selectedQuote.exceedsLimit}</span>
+                  </div>
+                )}
+
                 {/* Primary Action Button */}
                 <button
                   type="button"
@@ -444,6 +460,8 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                     </>
                   ) : !roadDistanceKm ? (
                     <span>Route Distance Unavailable</span>
+                  ) : selectedQuote.exceedsLimit ? (
+                    <span>Exceeds Bicycle Range • Select Motorcycle</span>
                   ) : (
                     <>
                       <span>

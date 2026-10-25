@@ -92,9 +92,30 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       setTimeout(() => setClickNotice(null), 3500);
     });
 
+    // Invalidate map size on container resize (critical for responsive layouts & mobile devices)
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    if (mapContainerRef.current) {
+      resizeObserver.observe(mapContainerRef.current);
+    }
+
     mapInstanceRef.current = map;
 
     return () => {
+      resizeObserver.disconnect();
+      if (routePolylineRef.current) {
+        routePolylineRef.current.remove();
+        routePolylineRef.current = null;
+      }
+      if (pickupMarkerRef.current) {
+        pickupMarkerRef.current.remove();
+        pickupMarkerRef.current = null;
+      }
+      if (dropoffMarkerRef.current) {
+        dropoffMarkerRef.current.remove();
+        dropoffMarkerRef.current = null;
+      }
       map.remove();
       mapInstanceRef.current = null;
     };
