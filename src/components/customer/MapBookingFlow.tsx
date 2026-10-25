@@ -1,0 +1,601 @@
+import React, { useState, useMemo } from 'react';
+import { 
+  Bike, 
+  ArrowRight, 
+  ArrowLeft, 
+  Check, 
+  AlertCircle, 
+  Info
+} from 'lucide-react';
+import { SubCity, VehicleType, PayerType, PackageCategory, Delivery } from '../../types/delivery';
+import { calculateFareQuote } from '../../data/addisLocations';
+import { MapRouteVisualizer } from './MapRouteVisualizer';
+import { LocationSearchInput } from './LocationSearchInput';
+
+interface MapBookingFlowProps {
+  onOrderCreated: (delivery: Delivery) => void;
+  onGoToDeliveries: () => void;
+}
+
+export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
+  onOrderCreated,
+  onGoToDeliveries,
+}) => {
+  // Booking step: 1 = Route & Vehicle, 2 = Package & Contacts, 3 = Payer & Confirmation
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+
+  // Route State
+  const [pickupSubcity, setPickupSubcity] = useState<SubCity>('Bole');
+  const [pickupLandmark, setPickupLandmark] = useState('Bole Medhanealem Cathedral');
+  const [dropoffSubcity, setDropoffSubcity] = useState<SubCity>('Kirkos');
+  const [dropoffLandmark, setDropoffLandmark] = useState('Kazanchis, ECA / UNECA Headquarters');
+
+  // Vehicle Type
+  const [vehicleType, setVehicleType] = useState<VehicleType>('motorcycle');
+
+  // Contact details
+  const [senderName, setSenderName] = useState('Abebe Kebede');
+  const [senderPhone, setSenderPhone] = useState('+251911234567');
+  const [receiverName, setReceiverName] = useState('Tsedey Alemu');
+  const [receiverPhone, setReceiverPhone] = useState('+251922345678');
+
+  // Package details
+  const [packageCategory, setPackageCategory] = useState<PackageCategory>('documents');
+  const [packageDescription, setPackageDescription] = useState('');
+  const [packageWeightKg, setPackageWeightKg] = useState<number>(1.5);
+  const [isFragile, setIsFragile] = useState(false);
+
+  // Payer rule
+  const [payerType, setPayerType] = useState<PayerType>('sender');
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Quotes for both vehicles to display in the vehicle cards
+  const motorcycleQuote = useMemo(() => {
+    return calculateFareQuote(pickupSubcity, dropoffSubcity, 'motorcycle', packageWeightKg);
+  }, [pickupSubcity, dropoffSubcity, packageWeightKg]);
+
+  const bicycleQuote = useMemo(() => {
+    return calculateFareQuote(pickupSubcity, dropoffSubcity, 'bicycle', packageWeightKg);
+  }, [pickupSubcity, dropoffSubcity, packageWeightKg]);
+
+  const selectedQuote = vehicleType === 'motorcycle' ? motorcycleQuote : bicycleQuote;
+
+  const handleSwapLocations = () => {
+    const tempSc = pickupSubcity;
+    const tempLm = pickupLandmark;
+    setPickupSubcity(dropoffSubcity);
+    setPickupLandmark(dropoffLandmark);
+    setDropoffSubcity(tempSc);
+    setDropoffLandmark(tempLm);
+  };
+
+  const handleStep1Next = () => {
+    if (selectedQuote.exceedsLimit) {
+      setValidationError(selectedQuote.exceedsLimit);
+      return;
+    }
+    setValidationError(null);
+    setStep(2);
+  };
+
+  const handleStep2Next = () => {
+    if (!senderPhone.trim() || !senderName.trim()) {
+      setValidationError('Sender name and Ethiopian phone number are required.');
+      return;
+    }
+    if (!receiverPhone.trim() || !receiverName.trim()) {
+      setValidationError('Recipient name and Ethiopian phone number are required.');
+      return;
+    }
+    setValidationError(null);
+    setStep(3);
+  };
+
+  const handleConfirmOrder = () => {
+    const randomSuffix = Math.floor(10000 + Math.random() * 90000);
+    const trackingNumber = `ET-DEL-${randomSuffix}`;
+
+    const newDelivery: Delivery = {
+      id: `del-${Date.now()}`,
+      trackingNumber,
+      vehicleType,
+      status: 'requested',
+      pickupAddress: `${pickupLandmark}, ${pickupSubcity}`,
+      pickupLandmark,
+      pickupSubcity,
+      pickupContactName: senderName,
+      pickupContactPhone: senderPhone,
+      dropoffAddress: `${dropoffLandmark}, ${dropoffSubcity}`,
+      dropoffLandmark,
+      dropoffSubcity,
+      dropoffContactName: receiverName,
+      dropoffContactPhone: receiverPhone,
+      packageCategory,
+      packageDescription: packageDescription || `${packageCategory.replace('_', ' ')} parcel`,
+      packageWeightKg,
+      isFragile,
+      payerType,
+      fareBase: selectedQuote.baseFare,
+      fareDistance: selectedQuote.distanceFare,
+      fareTotal: selectedQuote.totalFare,
+      commissionAmount: selectedQuote.commissionAmount,
+      estimatedDistanceKm: selectedQuote.estimatedDistanceKm,
+      paymentStatus: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+
+    onOrderCreated(newDelivery);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 2-Column Responsive Layout: Booking Flow Left, Map Right */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Yango-Style Guided Booking Card */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-2xl backdrop-blur-xl">
+            {/* Step Progress Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+              <div className="flex items-center gap-2">
+                {step > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setValidationError(null);
+                      setStep((s) => (s - 1) as 1 | 2);
+                    }}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                    Step {step} of 3
+                  </span>
+                  <h2 className="text-sm font-bold text-white">
+                    {step === 1 && 'Where to & Vehicle'}
+                    {step === 2 && 'Package & Contacts'}
+                    {step === 3 && 'Payment & Confirmation'}
+                  </h2>
+                </div>
+              </div>
+
+              {/* Progress Stepper Dots */}
+              <div className="flex items-center gap-1.5">
+                {[1, 2, 3].map((s) => (
+                  <span
+                    key={s}
+                    className={`h-1.5 rounded-full transition-all ${
+                      s === step
+                        ? 'w-6 bg-amber-400'
+                        : s < step
+                        ? 'w-2 bg-emerald-400'
+                        : 'w-2 bg-slate-700'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Validation Message */}
+            {validationError && (
+              <div className="mb-4 flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+                <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                <span>{validationError}</span>
+              </div>
+            )}
+
+            {/* STEP 1: ROUTE & VEHICLE SELECTION */}
+            {step === 1 && (
+              <div className="space-y-4">
+                {/* Compact Searchable Route Picker */}
+                <LocationSearchInput
+                  pickupSubcity={pickupSubcity}
+                  pickupLandmark={pickupLandmark}
+                  onSelectPickup={(sc, lm) => {
+                    setPickupSubcity(sc);
+                    setPickupLandmark(lm);
+                  }}
+                  dropoffSubcity={dropoffSubcity}
+                  dropoffLandmark={dropoffLandmark}
+                  onSelectDropoff={(sc, lm) => {
+                    setDropoffSubcity(sc);
+                    setDropoffLandmark(lm);
+                  }}
+                  onSwapLocations={handleSwapLocations}
+                />
+
+                {/* Vehicle Selection Cards (Yango style) */}
+                <div className="space-y-2 pt-1">
+                  <span className="text-xs font-semibold text-slate-300 block">
+                    Choose Delivery Vehicle
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Motorcycle Card */}
+                    <div
+                      onClick={() => setVehicleType('motorcycle')}
+                      className={`relative rounded-2xl border p-3.5 cursor-pointer transition-all ${
+                        vehicleType === 'motorcycle'
+                          ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
+                          : 'border-slate-800 bg-slate-950/60 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                              vehicleType === 'motorcycle'
+                                ? 'bg-amber-500 text-slate-950 font-bold'
+                                : 'bg-slate-800 text-slate-300'
+                            }`}
+                          >
+                            <Bike className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-white block">Motorcycle</span>
+                            <span className="text-[10px] text-slate-400">Up to 30 kg</span>
+                          </div>
+                        </div>
+
+                        {vehicleType === 'motorcycle' && (
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-slate-950">
+                            <Check className="h-3 w-3 stroke-[3]" />
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-3 flex items-baseline justify-between border-t border-slate-800/80 pt-2">
+                        <span className="text-[10px] text-slate-400">Est. Fare</span>
+                        <span className="font-mono text-sm font-extrabold text-amber-300">
+                          {motorcycleQuote.totalFare.toFixed(2)} ETB
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Bicycle Card */}
+                    <div
+                      onClick={() => {
+                        if (!bicycleQuote.exceedsLimit) {
+                          setVehicleType('bicycle');
+                        }
+                      }}
+                      className={`relative rounded-2xl border p-3.5 transition-all ${
+                        bicycleQuote.exceedsLimit
+                          ? 'border-slate-800/60 bg-slate-950/30 opacity-60 cursor-not-allowed'
+                          : vehicleType === 'bicycle'
+                          ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/40 cursor-pointer'
+                          : 'border-slate-800 bg-slate-950/60 hover:border-slate-700 cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                              vehicleType === 'bicycle'
+                                ? 'bg-emerald-500 text-slate-950 font-bold'
+                                : 'bg-slate-800 text-slate-300'
+                            }`}
+                          >
+                            <Bike className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold text-white">Bicycle Eco</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400">Max 5 kg • 7 km</span>
+                          </div>
+                        </div>
+
+                        {vehicleType === 'bicycle' && (
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-slate-950">
+                            <Check className="h-3 w-3 stroke-[3]" />
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-3 flex items-baseline justify-between border-t border-slate-800/80 pt-2">
+                        <span className="text-[10px] text-slate-400">
+                          {bicycleQuote.exceedsLimit ? 'Not Available' : 'Est. Fare'}
+                        </span>
+                        <span
+                          className={`font-mono text-sm font-extrabold ${
+                            bicycleQuote.exceedsLimit ? 'text-slate-500 text-xs' : 'text-emerald-300'
+                          }`}
+                        >
+                          {bicycleQuote.exceedsLimit
+                            ? '> 7 km limit'
+                            : `${bicycleQuote.totalFare.toFixed(2)} ETB`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Primary Action Button */}
+                <button
+                  type="button"
+                  onClick={handleStep1Next}
+                  disabled={Boolean(selectedQuote.exceedsLimit)}
+                  className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 py-3 px-4 text-xs font-bold text-slate-950 shadow-lg shadow-amber-500/20 hover:brightness-110 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  <span>
+                    Continue with {vehicleType === 'motorcycle' ? 'Motorcycle' : 'Bicycle'} •{' '}
+                    {selectedQuote.totalFare.toFixed(2)} ETB
+                  </span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {/* STEP 2: PACKAGE AND CONTACTS */}
+            {step === 2 && (
+              <div className="space-y-4">
+                {/* Contacts Section */}
+                <div className="space-y-3">
+                  <span className="text-xs font-semibold text-slate-300 block">
+                    Contact Information
+                  </span>
+
+                  {/* Sender Contact */}
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+                      Sender (Pickup Contact)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <input
+                          type="text"
+                          value={senderName}
+                          onChange={(e) => setSenderName(e.target.value)}
+                          placeholder="Sender Name"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          value={senderPhone}
+                          onChange={(e) => setSenderPhone(e.target.value)}
+                          placeholder="+251911..."
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white font-mono placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Receiver Contact */}
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+                      Recipient (Drop-off Contact)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <input
+                          type="text"
+                          value={receiverName}
+                          onChange={(e) => setReceiverName(e.target.value)}
+                          placeholder="Recipient Name"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          value={receiverPhone}
+                          onChange={(e) => setReceiverPhone(e.target.value)}
+                          placeholder="+251922..."
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white font-mono placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Package Details */}
+                <div className="space-y-3">
+                  <span className="text-xs font-semibold text-slate-300 block">
+                    Package Details
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Category</label>
+                      <select
+                        value={packageCategory}
+                        onChange={(e) => setPackageCategory(e.target.value as PackageCategory)}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                      >
+                        <option value="documents">Documents / Envelopes</option>
+                        <option value="food_perishables">Food & Bakery</option>
+                        <option value="electronics">Electronics & Tech</option>
+                        <option value="clothing">Clothes & Accessories</option>
+                        <option value="fragile_goods">Fragile Merchandise</option>
+                        <option value="other">Other Package</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">
+                        Weight: <strong className="text-amber-400">{packageWeightKg} kg</strong>
+                      </label>
+                      <input
+                        type="number"
+                        min="0.1"
+                        max={vehicleType === 'bicycle' ? 5.0 : 30.0}
+                        step="0.1"
+                        value={packageWeightKg}
+                        onChange={(e) => setPackageWeightKg(parseFloat(e.target.value) || 0.1)}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <input
+                      type="text"
+                      value={packageDescription}
+                      onChange={(e) => setPackageDescription(e.target.value)}
+                      placeholder="Optional note: e.g. Passport envelope, 2nd floor office"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="fragile-item"
+                      checked={isFragile}
+                      onChange={(e) => setIsFragile(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500"
+                    />
+                    <label htmlFor="fragile-item" className="text-xs text-slate-300 cursor-pointer">
+                      Fragile package (handle with care)
+                    </label>
+                  </div>
+                </div>
+
+                {/* Next button */}
+                <button
+                  type="button"
+                  onClick={handleStep2Next}
+                  className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 py-3 px-4 text-xs font-bold text-slate-950 shadow-lg shadow-amber-500/20 hover:brightness-110 active:scale-[0.99] transition-all"
+                >
+                  <span>Continue to Payer & Confirmation</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {/* STEP 3: PAYER & CONFIRMATION */}
+            {step === 3 && (
+              <div className="space-y-4">
+                {/* Designated Payer Segmented Control */}
+                <div className="space-y-2">
+                  <span className="text-xs font-semibold text-slate-300 block">
+                    Who Pays Delivery Fare?
+                  </span>
+
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-950 p-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPayerType('sender')}
+                      className={`rounded-lg py-2 text-xs font-bold transition-all ${
+                        payerType === 'sender'
+                          ? 'bg-amber-500 text-slate-950 shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Sender Pays
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPayerType('receiver')}
+                      className={`rounded-lg py-2 text-xs font-bold transition-all ${
+                        payerType === 'receiver'
+                          ? 'bg-amber-500 text-slate-950 shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Receiver Pays
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-1">
+                    <Info className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                    <span>
+                      {payerType === 'sender'
+                        ? 'Courier collects fare from sender upon pickup (Cash or Telebirr).'
+                        : 'Courier collects fare from receiver before parcel handover (Cash or Telebirr).'}
+                    </span>
+                  </p>
+                </div>
+
+                {/* Final Fare & Route Summary */}
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 text-xs">
+                    <span className="text-slate-400">Selected Vehicle</span>
+                    <span className="font-semibold text-white capitalize">
+                      {vehicleType === 'motorcycle' ? 'Motorcycle (Fast)' : 'Bicycle (Eco)'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Base Fare</span>
+                      <span className="font-mono text-slate-200">
+                        {selectedQuote.baseFare.toFixed(2)} ETB
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-400">
+                      <span>Distance Charge (~{selectedQuote.estimatedDistanceKm.toFixed(1)} km)</span>
+                      <span className="font-mono text-slate-200">
+                        {selectedQuote.distanceFare.toFixed(2)} ETB
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-400">
+                      <span>Platform Commission ({selectedQuote.commissionRatePct}%)</span>
+                      <span className="font-mono text-slate-400">
+                        {selectedQuote.commissionAmount.toFixed(2)} ETB
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-800 pt-2 flex items-baseline justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-amber-300 block">Total Due</span>
+                      <span className="text-[10px] text-slate-400">
+                        Paid by: <strong className="text-slate-200 capitalize">{payerType}</strong>
+                      </span>
+                    </div>
+                    <span className="font-mono text-2xl font-extrabold text-amber-400">
+                      {selectedQuote.totalFare.toFixed(2)} ETB
+                    </span>
+                  </div>
+                </div>
+
+                {/* Order Confirmation Primary Action */}
+                <button
+                  type="button"
+                  onClick={handleConfirmOrder}
+                  className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 py-3.5 px-4 text-xs font-extrabold text-slate-950 shadow-xl shadow-amber-500/25 hover:brightness-110 active:scale-[0.99] transition-all"
+                >
+                  <span>Confirm & Order Delivery • {selectedQuote.totalFare.toFixed(2)} ETB</span>
+                  <Check className="h-4 w-4 stroke-[3]" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Column: Visual Vector Route Map */}
+        <div className="lg:col-span-7 space-y-3">
+          <MapRouteVisualizer
+            pickupSubcity={pickupSubcity}
+            pickupLandmark={pickupLandmark}
+            dropoffSubcity={dropoffSubcity}
+            dropoffLandmark={dropoffLandmark}
+            distanceKm={selectedQuote.estimatedDistanceKm}
+            vehicleType={vehicleType}
+          />
+
+          {/* Quick info bar below map */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-400">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
+              <span>Available in all 11 Addis Ababa Sub-Cities</span>
+            </div>
+            <button
+              type="button"
+              onClick={onGoToDeliveries}
+              className="text-amber-400 hover:text-amber-300 hover:underline text-[11px] font-medium"
+            >
+              View Active & Past Deliveries →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
