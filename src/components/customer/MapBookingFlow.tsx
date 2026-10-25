@@ -1,17 +1,18 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { 
   Bike, 
   ArrowRight, 
   ArrowLeft, 
   Check, 
   AlertCircle, 
-  Info
+  Info,
+  Loader2
 } from 'lucide-react';
-import { SubCity, VehicleType, PayerType, PackageCategory, Delivery } from '../../types/delivery';
-import { calculateFareQuote } from '../../data/addisLocations';
+import { SubCity, VehicleType, PayerType, PackageCategory, Delivery, GeoPoint } from '../../types/delivery';
+import { calculateFareQuote, getCoordinatesForLandmark } from '../../data/addisLocations';
 import { LeafletMap } from './LeafletMap';
 import { LocationSearchInput } from './LocationSearchInput';
-import { RouteResult } from '../../services/routingService';
+import { RouteResult, fetchRoadRoute } from '../../services/routingService';
 
 // Validation for Ethiopian mobile numbers (+2519..., +2517..., 09..., 07..., 9..., 7...)
 export function isValidEthiopianPhone(phone: string): boolean {
@@ -31,13 +32,22 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
   // Booking step: 1 = Route & Vehicle, 2 = Package & Contacts, 3 = Payer & Confirmation
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
-  // Route State
+  // Route State: Sub-city, landmark label, and exact GPS coordinates
   const [pickupSubcity, setPickupSubcity] = useState<SubCity>('Bole');
   const [pickupLandmark, setPickupLandmark] = useState('Bole Medhanealem Cathedral');
+  const [pickupCoords, setPickupCoords] = useState<GeoPoint>(() =>
+    getCoordinatesForLandmark('Bole', 'Bole Medhanealem Cathedral')
+  );
+
   const [dropoffSubcity, setDropoffSubcity] = useState<SubCity>('Kirkos');
   const [dropoffLandmark, setDropoffLandmark] = useState('Kazanchis, ECA / UNECA Headquarters');
+  const [dropoffCoords, setDropoffCoords] = useState<GeoPoint>(() =>
+    getCoordinatesForLandmark('Kirkos', 'Kazanchis, ECA / UNECA Headquarters')
+  );
 
-  // Real road distance in km retrieved from OSRM router
+  // Road route and distance state
+  const [currentRoute, setCurrentRoute] = useState<RouteResult | null>(null);
+  const [isLoadingRoute, setIsLoadingRoute] = useState<boolean>(true);
   const [roadDistanceKm, setRoadDistanceKm] = useState<number | undefined>(undefined);
 
   // Vehicle Type
@@ -59,8 +69,57 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
   const [payerType, setPayerType] = useState<PayerType>('sender');
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const handleRouteCalculated = useCallback((route: RouteResult) => {
-    setRoadDistanceKm(route.distanceKm);
+  // Monotonic sequence request ID to prevent race conditions where a slower old response overwrites a newer one
+  const routeRequestIdRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Recalculate road route when either coordinate changes (avoids refetching on unrelated state changes)
+  useEffect(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    const reqId = ++routeRequestIdRef.current;
+    setIsLoadingRoute(true);
+
+    fetchRoadRoute(pickupCoords, dropoffCoords, controller.signal)
+      .then((route) => {
+        // Discard older, superseded response
+        if (reqId !== routeRequestIdRef.current) return;
+        setCurrentRoute(route);
+        setRoadDistanceKm(route.distanceKm);
+        setIsLoadingRoute(false);
+      })
+      .catch(() => {
+        if (reqId !== routeRequestIdRef.current) return;
+        setIsLoadingRoute(false);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [pickupCoords.lat, pickupCoords.lng, dropoffCoords.lat, dropoffCoords.lng]);
+
+  const handleSelectPickup = useCallback((sc: SubCity, lm: string, coords?: GeoPoint) => {
+    setPickupSubcity(sc);
+    setPickupLandmark(lm);
+    if (coords) {
+      setPickupCoords(coords);
+    } else {
+      setPickupCoords(getCoordinatesForLandmark(sc, lm));
+    }
+  }, []);
+
+  const handleSelectDropoff = useCallback((sc: SubCity, lm: string, coords?: GeoPoint) => {
+    setDropoffSubcity(sc);
+    setDropoffLandmark(lm);
+    if (coords) {
+      setDropoffCoords(coords);
+    } else {
+      setDropoffCoords(getCoordinatesForLandmark(sc, lm));
+    }
   }, []);
 
   // Quotes for both vehicles to display in the vehicle cards connected to actual road distance
@@ -74,14 +133,20 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
 
   const selectedQuote = vehicleType === 'motorcycle' ? motorcycleQuote : bicycleQuote;
 
-  const handleSwapLocations = () => {
+  // Swapping locations swaps both human-friendly labels and exact coordinates
+  const handleSwapLocations = useCallback(() => {
     const tempSc = pickupSubcity;
     const tempLm = pickupLandmark;
+    const tempCoords = pickupCoords;
+
     setPickupSubcity(dropoffSubcity);
     setPickupLandmark(dropoffLandmark);
+    setPickupCoords(dropoffCoords);
+
     setDropoffSubcity(tempSc);
     setDropoffLandmark(tempLm);
-  };
+    setDropoffCoords(tempCoords);
+  }, [pickupSubcity, pickupLandmark, pickupCoords, dropoffSubcity, dropoffLandmark, dropoffCoords]);
 
   const handleStep1Next = () => {
     if (selectedQuote.exceedsLimit) {
@@ -133,11 +198,13 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
       pickupAddress: `${pickupLandmark}, ${pickupSubcity}`,
       pickupLandmark,
       pickupSubcity,
+      pickupCoords,
       pickupContactName: senderName,
       pickupContactPhone: senderPhone,
       dropoffAddress: `${dropoffLandmark}, ${dropoffSubcity}`,
       dropoffLandmark,
       dropoffSubcity,
+      dropoffCoords,
       dropoffContactName: receiverName,
       dropoffContactPhone: receiverPhone,
       packageCategory,
@@ -223,16 +290,10 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                 <LocationSearchInput
                   pickupSubcity={pickupSubcity}
                   pickupLandmark={pickupLandmark}
-                  onSelectPickup={(sc, lm) => {
-                    setPickupSubcity(sc);
-                    setPickupLandmark(lm);
-                  }}
+                  onSelectPickup={handleSelectPickup}
                   dropoffSubcity={dropoffSubcity}
                   dropoffLandmark={dropoffLandmark}
-                  onSelectDropoff={(sc, lm) => {
-                    setDropoffSubcity(sc);
-                    setDropoffLandmark(lm);
-                  }}
+                  onSelectDropoff={handleSelectDropoff}
                   onSwapLocations={handleSwapLocations}
                 />
 
@@ -279,9 +340,18 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                       </div>
 
                       <div className="mt-3 flex items-baseline justify-between border-t border-slate-800/80 pt-2">
-                        <span className="text-[10px] text-slate-400">Est. Fare</span>
+                        <span className="text-[10px] text-slate-400">
+                          {isLoadingRoute ? 'Calculating...' : 'Est. Fare'}
+                        </span>
                         <span className="font-mono text-sm font-extrabold text-amber-300">
-                          {motorcycleQuote.totalFare.toFixed(2)} ETB
+                          {isLoadingRoute ? (
+                            <span className="flex items-center gap-1 text-xs text-amber-400">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>...</span>
+                            </span>
+                          ) : (
+                            `${motorcycleQuote.totalFare.toFixed(2)} ETB`
+                          )}
                         </span>
                       </div>
                     </button>
@@ -333,16 +403,27 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
 
                       <div className="mt-3 flex items-baseline justify-between border-t border-slate-800/80 pt-2">
                         <span className="text-[10px] text-slate-400">
-                          {bicycleQuote.exceedsLimit ? 'Not Available' : 'Est. Fare'}
+                          {isLoadingRoute
+                            ? 'Calculating...'
+                            : bicycleQuote.exceedsLimit
+                            ? 'Not Available'
+                            : 'Est. Fare'}
                         </span>
                         <span
                           className={`font-mono text-sm font-extrabold ${
                             bicycleQuote.exceedsLimit ? 'text-slate-500 text-xs' : 'text-emerald-300'
                           }`}
                         >
-                          {bicycleQuote.exceedsLimit
-                            ? '> 7 km limit'
-                            : `${bicycleQuote.totalFare.toFixed(2)} ETB`}
+                          {isLoadingRoute ? (
+                            <span className="flex items-center gap-1 text-xs text-emerald-400">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>...</span>
+                            </span>
+                          ) : bicycleQuote.exceedsLimit ? (
+                            '> 7 km limit'
+                          ) : (
+                            `${bicycleQuote.totalFare.toFixed(2)} ETB`
+                          )}
                         </span>
                       </div>
                     </button>
@@ -353,14 +434,25 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                 <button
                   type="button"
                   onClick={handleStep1Next}
-                  disabled={Boolean(selectedQuote.exceedsLimit)}
+                  disabled={isLoadingRoute || !roadDistanceKm || Boolean(selectedQuote.exceedsLimit)}
                   className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 py-3 px-4 text-xs font-bold text-slate-950 shadow-lg shadow-amber-500/20 hover:brightness-110 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
-                  <span>
-                    Continue with {vehicleType === 'motorcycle' ? 'Motorcycle' : 'Bicycle'} •{' '}
-                    {selectedQuote.totalFare.toFixed(2)} ETB
-                  </span>
-                  <ArrowRight className="h-4 w-4" />
+                  {isLoadingRoute ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Calculating Route & Fare...</span>
+                    </>
+                  ) : !roadDistanceKm ? (
+                    <span>Route Distance Unavailable</span>
+                  ) : (
+                    <>
+                      <span>
+                        Continue with {vehicleType === 'motorcycle' ? 'Motorcycle' : 'Bicycle'} •{' '}
+                        {selectedQuote.totalFare.toFixed(2)} ETB
+                      </span>
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
                 </button>
               </div>
             )}
@@ -565,12 +657,34 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>Distance Charge (~{selectedQuote.estimatedDistanceKm.toFixed(1)} km)</span>
+                      <span>
+                        Distance Charge (~{selectedQuote.estimatedDistanceKm.toFixed(1)} km
+                        {currentRoute?.source === 'fallback_estimate' ? ' approx.' : ''})
+                      </span>
                       <span className="font-mono text-slate-200">
-                        {selectedQuote.distanceFare.toFixed(2)} ETB
+                        {isLoadingRoute ? (
+                          <span className="flex items-center gap-1 text-xs text-amber-400">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span>...</span>
+                          </span>
+                        ) : (
+                          `${selectedQuote.distanceFare.toFixed(2)} ETB`
+                        )}
                       </span>
                     </div>
                   </div>
+
+                  {currentRoute?.source === 'fallback_estimate' && !isLoadingRoute && (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-300 flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+                      <div>
+                        <strong className="font-semibold block">Approximate Estimate</strong>
+                        <span>
+                          Road route server is currently unreachable. Displaying approximate straight-line estimate with road curvature factor.
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="border-t border-slate-800 pt-2 flex items-baseline justify-between">
                     <div>
@@ -580,7 +694,14 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                       </span>
                     </div>
                     <span className="font-mono text-2xl font-extrabold text-amber-400">
-                      {selectedQuote.totalFare.toFixed(2)} ETB
+                      {isLoadingRoute ? (
+                        <span className="flex items-center gap-1 text-sm text-amber-400">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Updating...</span>
+                        </span>
+                      ) : (
+                        `${selectedQuote.totalFare.toFixed(2)} ETB`
+                      )}
                     </span>
                   </div>
 
@@ -593,10 +714,22 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                 <button
                   type="button"
                   onClick={handleConfirmOrder}
-                  className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 py-3.5 px-4 text-xs font-extrabold text-slate-950 shadow-xl shadow-amber-500/25 hover:brightness-110 active:scale-[0.99] transition-all"
+                  disabled={isLoadingRoute || !roadDistanceKm || roadDistanceKm <= 0}
+                  className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 py-3.5 px-4 text-xs font-extrabold text-slate-950 shadow-xl shadow-amber-500/25 hover:brightness-110 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
-                  <span>Confirm & Order Delivery • {selectedQuote.totalFare.toFixed(2)} ETB</span>
-                  <Check className="h-4 w-4 stroke-[3]" />
+                  {isLoadingRoute ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Recalculating Route & Fare...</span>
+                    </>
+                  ) : !roadDistanceKm ? (
+                    <span>Route Distance Unavailable</span>
+                  ) : (
+                    <>
+                      <span>Confirm & Order Delivery • {selectedQuote.totalFare.toFixed(2)} ETB</span>
+                      <Check className="h-4 w-4 stroke-[3]" />
+                    </>
+                  )}
                 </button>
               </div>
             )}
@@ -606,20 +739,17 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
         {/* Right Column: Interactive Real OpenStreetMap Map */}
         <div className="lg:col-span-7 space-y-3">
           <LeafletMap
+            pickupCoords={pickupCoords}
             pickupSubcity={pickupSubcity}
             pickupLandmark={pickupLandmark}
-            onSelectPickup={(sc, lm) => {
-              setPickupSubcity(sc);
-              setPickupLandmark(lm);
-            }}
+            onSelectPickup={handleSelectPickup}
+            dropoffCoords={dropoffCoords}
             dropoffSubcity={dropoffSubcity}
             dropoffLandmark={dropoffLandmark}
-            onSelectDropoff={(sc, lm) => {
-              setDropoffSubcity(sc);
-              setDropoffLandmark(lm);
-            }}
+            onSelectDropoff={handleSelectDropoff}
             vehicleType={vehicleType}
-            onRouteCalculated={handleRouteCalculated}
+            currentRoute={currentRoute}
+            isLoadingRoute={isLoadingRoute}
           />
 
           {/* Quick info bar below map */}

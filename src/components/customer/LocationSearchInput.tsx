@@ -1,15 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MapPin, Search, ArrowUpDown, Crosshair, X, Check } from 'lucide-react';
-import { SubCity } from '../../types/delivery';
-import { ADDIS_SUBCITIES, POPULAR_LANDMARKS } from '../../data/addisLocations';
+import { SubCity, GeoPoint } from '../../types/delivery';
+import { ADDIS_SUBCITIES, POPULAR_LANDMARKS, getCoordinatesForLandmark } from '../../data/addisLocations';
 
 interface LocationSearchInputProps {
   pickupSubcity: SubCity;
   pickupLandmark: string;
-  onSelectPickup: (subcity: SubCity, landmark: string) => void;
+  onSelectPickup: (subcity: SubCity, landmark: string, coords?: GeoPoint) => void;
   dropoffSubcity: SubCity;
   dropoffLandmark: string;
-  onSelectDropoff: (subcity: SubCity, landmark: string) => void;
+  onSelectDropoff: (subcity: SubCity, landmark: string, coords?: GeoPoint) => void;
   onSwapLocations: () => void;
 }
 
@@ -59,16 +59,18 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
   const handleUseCurrentLocation = (e: React.MouseEvent) => {
     e.stopPropagation();
     // Honest: Explicitly note this is a pilot demo location, not fake real GPS
-    onSelectPickup('Bole', 'Bole Medhanealem Cathedral');
+    const sampleCoords = getCoordinatesForLandmark('Bole', 'Bole Medhanealem Cathedral');
+    onSelectPickup('Bole', 'Bole Medhanealem Cathedral', sampleCoords);
     setGpsDemoNotice(true);
     setTimeout(() => setGpsDemoNotice(false), 4000);
   };
 
   const handleSelect = (sc: SubCity, lm: string) => {
+    const coords = getCoordinatesForLandmark(sc, lm);
     if (activePicker === 'pickup') {
-      onSelectPickup(sc, lm);
+      onSelectPickup(sc, lm, coords);
     } else {
-      onSelectDropoff(sc, lm);
+      onSelectDropoff(sc, lm, coords);
     }
     setActivePicker(null);
     setSearchQuery('');

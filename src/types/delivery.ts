@@ -57,11 +57,13 @@ export interface Delivery {
   pickupAddress: string;
   pickupLandmark: string;
   pickupSubcity: SubCity;
+  pickupCoords?: GeoPoint;
   pickupContactName: string;
   pickupContactPhone: string;
   dropoffAddress: string;
   dropoffLandmark: string;
   dropoffSubcity: SubCity;
+  dropoffCoords?: GeoPoint;
   dropoffContactName: string;
   dropoffContactPhone: string;
   packageCategory: PackageCategory;

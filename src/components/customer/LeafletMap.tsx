@@ -1,30 +1,36 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { Navigation, Compass, Check, Locate, Loader2 } from 'lucide-react';
+import { Navigation, Compass, Check, Locate, Loader2, AlertTriangle } from 'lucide-react';
 import { SubCity, GeoPoint } from '../../types/delivery';
-import { getCoordinatesForLandmark, findNearestLandmark } from '../../data/addisLocations';
-import { fetchRoadRoute, RouteResult } from '../../services/routingService';
+import { findNearestLandmark } from '../../data/addisLocations';
+import { RouteResult } from '../../services/routingService';
 
 interface LeafletMapProps {
+  pickupCoords: GeoPoint;
   pickupSubcity: SubCity;
   pickupLandmark: string;
   onSelectPickup: (subcity: SubCity, landmark: string, coords: GeoPoint) => void;
+  dropoffCoords: GeoPoint;
   dropoffSubcity: SubCity;
   dropoffLandmark: string;
   onSelectDropoff: (subcity: SubCity, landmark: string, coords: GeoPoint) => void;
   vehicleType: 'motorcycle' | 'bicycle';
-  onRouteCalculated: (route: RouteResult) => void;
+  currentRoute: RouteResult | null;
+  isLoadingRoute: boolean;
 }
 
 export const LeafletMap: React.FC<LeafletMapProps> = ({
+  pickupCoords,
   pickupSubcity,
   pickupLandmark,
   onSelectPickup,
+  dropoffCoords,
   dropoffSubcity,
   dropoffLandmark,
   onSelectDropoff,
   vehicleType,
-  onRouteCalculated,
+  currentRoute,
+  isLoadingRoute,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -33,13 +39,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
   const routePolylineRef = useRef<L.Polyline | null>(null);
 
   const [pinMode, setPinMode] = useState<'pickup' | 'dropoff'>('dropoff');
-  const [currentRoute, setCurrentRoute] = useState<RouteResult | null>(null);
-  const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [clickNotice, setClickNotice] = useState<string | null>(null);
-
-  // Derive coordinates
-  const pickupCoords = getCoordinatesForLandmark(pickupSubcity, pickupLandmark);
-  const dropoffCoords = getCoordinatesForLandmark(dropoffSubcity, dropoffLandmark);
 
   // Keep references to latest callbacks and state to avoid stale closures in Leaflet events
   const onSelectPickupRef = useRef(onSelectPickup);
@@ -76,17 +76,17 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       maxZoom: 19,
     }).addTo(map);
 
-    // Map click handler: allows clicking anywhere on the map to set pickup or drop-off
+    // Map click handler: preserves exact coordinates while looking up nearest landmark for friendly labeling
     map.on('click', (e: L.LeafletMouseEvent) => {
       const { lat, lng } = e.latlng;
       const nearest = findNearestLandmark(lat, lng);
 
       if (pinModeRef.current === 'pickup') {
         onSelectPickupRef.current(nearest.subcity, nearest.landmark, { lat, lng });
-        setClickNotice(`Pickup set: ${nearest.landmark} (${nearest.subcity})`);
+        setClickNotice(`Pickup pinned: ${nearest.landmark} (${nearest.subcity})`);
       } else {
         onSelectDropoffRef.current(nearest.subcity, nearest.landmark, { lat, lng });
-        setClickNotice(`Drop-off set: ${nearest.landmark} (${nearest.subcity})`);
+        setClickNotice(`Drop-off pinned: ${nearest.landmark} (${nearest.subcity})`);
       }
 
       setTimeout(() => setClickNotice(null), 3500);
@@ -100,12 +100,11 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     };
   }, []);
 
-  // 2. Update Markers and Real Road Route when coordinates change
+  // 2. Manage Draggable Markers at Exact Coordinates
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    // Create custom DivIcons for A (Pickup) and B (Dropoff)
     const pickupIcon = L.divIcon({
       className: 'custom-pin-pickup',
       html: `
@@ -140,18 +139,23 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       marker.on('dragend', () => {
         const pos = marker.getLatLng();
         const nearest = findNearestLandmark(pos.lat, pos.lng);
+        // Preserve exact dragged coordinates, do not snap to landmark
         onSelectPickupRef.current(nearest.subcity, nearest.landmark, { lat: pos.lat, lng: pos.lng });
       });
 
       pickupMarkerRef.current = marker;
     } else {
-      pickupMarkerRef.current.setLatLng([pickupCoords.lat, pickupCoords.lng]);
+      const currentPos = pickupMarkerRef.current.getLatLng();
+      if (currentPos.lat !== pickupCoords.lat || currentPos.lng !== pickupCoords.lng) {
+        pickupMarkerRef.current.setLatLng([pickupCoords.lat, pickupCoords.lng]);
+      }
     }
 
     pickupMarkerRef.current.bindPopup(
       `<div style="font-size: 12px; font-weight: bold; color: #0f172a;">
         🟢 Pickup: ${pickupLandmark}<br/>
-        <span style="font-size: 10px; color: #64748b;">${pickupSubcity} Sub-City</span>
+        <span style="font-size: 10px; color: #64748b;">${pickupSubcity} Sub-City</span><br/>
+        <span style="font-size: 9px; color: #94a3b8; font-family: monospace;">(${pickupCoords.lat.toFixed(5)}, ${pickupCoords.lng.toFixed(5)})</span>
       </div>`
     );
 
@@ -165,64 +169,67 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       marker.on('dragend', () => {
         const pos = marker.getLatLng();
         const nearest = findNearestLandmark(pos.lat, pos.lng);
+        // Preserve exact dragged coordinates, do not snap to landmark
         onSelectDropoffRef.current(nearest.subcity, nearest.landmark, { lat: pos.lat, lng: pos.lng });
       });
 
       dropoffMarkerRef.current = marker;
     } else {
-      dropoffMarkerRef.current.setLatLng([dropoffCoords.lat, dropoffCoords.lng]);
+      const currentPos = dropoffMarkerRef.current.getLatLng();
+      if (currentPos.lat !== dropoffCoords.lat || currentPos.lng !== dropoffCoords.lng) {
+        dropoffMarkerRef.current.setLatLng([dropoffCoords.lat, dropoffCoords.lng]);
+      }
     }
 
     dropoffMarkerRef.current.bindPopup(
       `<div style="font-size: 12px; font-weight: bold; color: #0f172a;">
         📍 Drop-off: ${dropoffLandmark}<br/>
-        <span style="font-size: 10px; color: #64748b;">${dropoffSubcity} Sub-City</span>
+        <span style="font-size: 10px; color: #64748b;">${dropoffSubcity} Sub-City</span><br/>
+        <span style="font-size: 9px; color: #94a3b8; font-family: monospace;">(${dropoffCoords.lat.toFixed(5)}, ${dropoffCoords.lng.toFixed(5)})</span>
       </div>`
     );
+  }, [pickupCoords.lat, pickupCoords.lng, dropoffCoords.lat, dropoffCoords.lng, pickupLandmark, dropoffLandmark, pickupSubcity, dropoffSubcity]);
 
-    // 3. Fetch Road Route (OSRM)
-    let isCancelled = false;
-    setIsLoadingRoute(true);
+  // 3. Render Route Polyline honestly: solid for OSRM road route, dashed for approximate fallback
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !currentRoute) return;
 
-    fetchRoadRoute(pickupCoords, dropoffCoords).then((route) => {
-      if (isCancelled) return;
-      setIsLoadingRoute(false);
-      setCurrentRoute(route);
-      onRouteCalculated(route);
+    if (routePolylineRef.current) {
+      map.removeLayer(routePolylineRef.current);
+    }
 
-      // Draw / update polyline on map
-      if (routePolylineRef.current) {
-        map.removeLayer(routePolylineRef.current);
-      }
+    const isRealRoad = currentRoute.isRealRoad && currentRoute.source === 'osrm_road';
 
-      const polyline = L.polyline(route.coordinates, {
-        color: '#f59e0b',
-        weight: 5,
-        opacity: 0.85,
-        lineCap: 'round',
-        lineJoin: 'round',
-        dashArray: route.isRealRoad ? undefined : '8, 6',
-      }).addTo(map);
+    const polyline = L.polyline(currentRoute.coordinates, {
+      color: isRealRoad ? '#f59e0b' : '#fbbf24',
+      weight: isRealRoad ? 5 : 4,
+      opacity: 0.85,
+      lineCap: 'round',
+      lineJoin: 'round',
+      dashArray: isRealRoad ? undefined : '8, 8', // Distinct dashed appearance for approximate fallback
+    }).addTo(map);
 
-      routePolylineRef.current = polyline;
+    routePolylineRef.current = polyline;
 
-      // Fit bounds to show entire route with padding
+    if (pickupMarkerRef.current && dropoffMarkerRef.current) {
       const group = L.featureGroup([
-        pickupMarkerRef.current!,
-        dropoffMarkerRef.current!,
+        pickupMarkerRef.current,
+        dropoffMarkerRef.current,
         polyline,
       ]);
-      map.fitBounds(group.getBounds(), { padding: [40, 40] });
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [pickupCoords.lat, pickupCoords.lng, dropoffCoords.lat, dropoffCoords.lng, pickupLandmark, dropoffLandmark, pickupSubcity, dropoffSubcity, onRouteCalculated]);
+      map.fitBounds(group.getBounds(), { padding: [45, 45], maxZoom: 16 });
+    }
+  }, [currentRoute]);
 
   const handleRecenter = () => {
-    if (mapInstanceRef.current && routePolylineRef.current) {
-      mapInstanceRef.current.fitBounds(routePolylineRef.current.getBounds(), { padding: [40, 40] });
+    if (mapInstanceRef.current) {
+      if (routePolylineRef.current) {
+        mapInstanceRef.current.fitBounds(routePolylineRef.current.getBounds(), { padding: [45, 45], maxZoom: 16 });
+      } else if (pickupMarkerRef.current && dropoffMarkerRef.current) {
+        const group = L.featureGroup([pickupMarkerRef.current, dropoffMarkerRef.current]);
+        mapInstanceRef.current.fitBounds(group.getBounds(), { padding: [45, 45], maxZoom: 16 });
+      }
     }
   };
 
@@ -248,18 +255,42 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         </div>
         <div>
           <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-white">
-            <span>~{currentRoute ? currentRoute.distanceKm.toFixed(1) : '...'} km</span>
-            <span className="text-slate-500">•</span>
-            <span className="text-amber-400">~{estMinutes} mins</span>
-            <span className="text-[10px] font-sans font-normal text-emerald-400">
-              {currentRoute?.isRealRoad ? '(Real Road)' : '(Approx. Estimate)'}
-            </span>
+            {isLoadingRoute ? (
+              <span className="text-amber-400 font-sans text-xs flex items-center gap-1">
+                Calculating road route...
+              </span>
+            ) : currentRoute ? (
+              <>
+                <span>~{currentRoute.distanceKm.toFixed(1)} km</span>
+                <span className="text-slate-500">•</span>
+                <span className="text-amber-400">~{estMinutes} mins</span>
+                {currentRoute.source === 'osrm_road' ? (
+                  <span className="ml-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-sans font-medium text-emerald-300 border border-emerald-500/30">
+                    Road Route (OSRM)
+                  </span>
+                ) : (
+                  <span className="ml-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-sans font-medium text-amber-300 border border-amber-500/30">
+                    Approx. Fallback
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-slate-400 text-xs">Set pins on map</span>
+            )}
           </div>
-          <p className="text-[10px] text-slate-400">
-            {pickupSubcity} → {dropoffSubcity}
+          <p className="text-[10px] text-slate-400 truncate max-w-[200px] sm:max-w-[280px]">
+            {pickupLandmark || pickupSubcity} → {dropoffLandmark || dropoffSubcity}
           </p>
         </div>
       </div>
+
+      {/* Fallback Notice Banner when road service is offline */}
+      {currentRoute && currentRoute.source === 'fallback_estimate' && !isLoadingRoute && (
+        <div className="absolute top-16 left-4 z-[500] max-w-xs rounded-xl border border-amber-500/40 bg-slate-950/90 p-2 text-[10px] text-amber-300 shadow-xl backdrop-blur-md flex items-center gap-1.5">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+          <span>Approximate fallback estimate. Road routing server unavailable.</span>
+        </div>
+      )}
 
       {/* Top Right: Pin Placement Mode Switcher */}
       <div className="absolute top-4 right-4 z-[500] flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-950/90 p-1 text-[11px] shadow-lg backdrop-blur-md">
