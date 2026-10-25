@@ -97,6 +97,36 @@ export function maskPhone(phone: string): string {
 }
 
 /**
+ * Helper to auto-load .env variables if running directly in Node without --env-file
+ */
+function tryLoadEnv(): void {
+  if (typeof process === 'undefined' || !process.env) return;
+  if (process.env.AFROMESSAGE_API_KEY) return;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      for (const line of content.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          const val = trimmed.slice(eqIdx + 1).trim();
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore in browser or restricted runtimes
+  }
+}
+
+/**
  * Checks server-side configuration status for AfroMessage.
  */
 export function getAfroMessageConfig(): {
@@ -104,6 +134,7 @@ export function getAfroMessageConfig(): {
   missingKeys: string[];
   config: AfroMessageConfig;
 } {
+  tryLoadEnv();
   const apiKey = process.env.AFROMESSAGE_API_KEY || '';
   const senderName = process.env.AFROMESSAGE_SENDER_NAME || 'AfroMessage';
   const identifierId = process.env.AFROMESSAGE_IDENTIFIER_ID || '';

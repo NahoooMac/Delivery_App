@@ -9,7 +9,11 @@ import {
   CreditCard
 } from 'lucide-react';
 
-export const CustomerProfile: React.FC = () => {
+interface CustomerProfileProps {
+  onNavigate?: (portal: 'customer' | 'courier' | 'admin') => void;
+}
+
+export const CustomerProfile: React.FC<CustomerProfileProps> = ({ onNavigate }) => {
   return (
     <div className="w-full h-full flex flex-col bg-neutral-50 overflow-y-auto p-4 space-y-4">
       {/* Header */}
@@ -81,6 +85,32 @@ export const CustomerProfile: React.FC = () => {
             <span>Help & Support</span>
           </div>
           <ChevronRight className="h-4 w-4 text-neutral-400" />
+        </div>
+      </div>
+
+      {/* Standalone Individual Portals Switcher */}
+      <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm text-xs space-y-2.5">
+        <div className="font-bold text-neutral-900">Switch Application Side</div>
+        <p className="text-[11px] text-neutral-500">
+          Open dedicated standalone portals for courier riders or administrator audit.
+        </p>
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => onNavigate ? onNavigate('courier') : window.location.assign('/riders')}
+            className="flex flex-col p-3 rounded-xl border border-neutral-200 hover:border-black text-left transition-all bg-neutral-50 hover:bg-white"
+          >
+            <span className="font-extrabold text-xs text-neutral-900">Riders Side</span>
+            <span className="text-[10px] text-neutral-500 font-mono mt-0.5">/riders</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate ? onNavigate('admin') : window.location.assign('/admin')}
+            className="flex flex-col p-3 rounded-xl border border-neutral-200 hover:border-black text-left transition-all bg-neutral-50 hover:bg-white"
+          >
+            <span className="font-extrabold text-xs text-neutral-900">Admin Page</span>
+            <span className="text-[10px] text-neutral-500 font-mono mt-0.5">/admin</span>
+          </button>
         </div>
       </div>
 

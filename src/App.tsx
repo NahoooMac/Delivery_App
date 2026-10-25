@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { MapBookingFlow } from './components/customer/MapBookingFlow';
 import { DeliveriesList } from './components/customer/DeliveriesList';
 import { CustomerProfile } from './components/customer/CustomerProfile';
@@ -7,15 +7,38 @@ import { CourierJobBoardPreview } from './components/courier/CourierJobBoardPrev
 import { AdminAuditPreview } from './components/admin/AdminAuditPreview';
 import { Delivery, DeliveryStatus } from './types/delivery';
 import { INITIAL_MOCK_DELIVERIES } from './data/mockDeliveries';
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, Bike, Shield, ArrowUpRight } from 'lucide-react';
 
 export type ActivePortal = 'customer' | 'courier' | 'admin';
 
+function getInitialPortal(): ActivePortal {
+  if (typeof window === 'undefined') return 'customer';
+  const path = window.location.pathname.toLowerCase();
+  if (path.startsWith('/riders') || path.startsWith('/rider')) return 'courier';
+  if (path.startsWith('/admin')) return 'admin';
+  return 'customer'; // default / or /users
+}
+
 export function App() {
-  const [activePortal, setActivePortal] = useState<ActivePortal>('customer');
+  const [activePortal, setActivePortal] = useState<ActivePortal>(getInitialPortal);
   const [customerTab, setCustomerTab] = useState<CustomerTab>('book');
   const [deliveries, setDeliveries] = useState<Delivery[]>(INITIAL_MOCK_DELIVERIES);
   const [notification, setNotification] = useState<string | null>(null);
+
+  // Sync state with browser History / URL
+  useEffect(() => {
+    const handlePopState = () => {
+      setActivePortal(getInitialPortal());
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigatePortal = useCallback((portal: ActivePortal) => {
+    const targetPath = portal === 'customer' ? '/users' : portal === 'courier' ? '/riders' : '/admin';
+    window.history.pushState({}, '', targetPath);
+    setActivePortal(portal);
+  }, []);
 
   const isActiveStatus = (status: DeliveryStatus) =>
     ['requested', 'assigned', 'arrived_pickup', 'picked_up', 'arrived_dropoff'].includes(status);
@@ -50,60 +73,103 @@ export function App() {
 
   return (
     <div className="min-h-screen w-full bg-neutral-900 text-neutral-100 font-sans flex flex-col overflow-x-hidden selection:bg-neutral-800 selection:text-white">
-      {/* Sleek Top Navigation Bar */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-14 bg-black/85 backdrop-blur-md border-b border-neutral-800 px-3 sm:px-6 flex items-center justify-between">
-        {/* Brand */}
-        <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-xl bg-white flex items-center justify-center text-black font-black text-sm shadow-md">
-            S
+      {/* 1. CUSTOMER PORTAL HEADER (/users or /) */}
+      {activePortal === 'customer' && (
+        <header className="fixed top-0 left-0 right-0 z-40 h-13 bg-black/85 backdrop-blur-md border-b border-neutral-800 px-4 sm:px-6 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-lg bg-white flex items-center justify-center text-black font-black text-xs shadow-sm">
+              S
+            </div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-extrabold text-sm sm:text-base tracking-tight text-white">
+                SwiftAddis
+              </span>
+              <span className="text-[10px] bg-neutral-800 text-neutral-300 font-semibold px-2 py-0.5 rounded-full hidden xs:inline-block">
+                Addis Delivery
+              </span>
+            </div>
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="font-extrabold text-sm sm:text-base tracking-tight text-white">
-              SwiftAddis
-            </span>
-            <span className="text-[10px] bg-neutral-800 text-neutral-300 font-semibold px-2 py-0.5 rounded-full hidden xs:inline-block">
-              Addis Delivery
-            </span>
+          <div className="text-[11px] text-neutral-400 font-medium hidden sm:block">
+            Motorcycle & Bicycle Package Dispatch
           </div>
-        </div>
+        </header>
+      )}
 
-        {/* Development Portals Switcher */}
-        <div className="flex items-center bg-neutral-900/90 p-1 rounded-full border border-neutral-800 text-xs shadow-inner">
-          <button
-            type="button"
-            onClick={() => setActivePortal('customer')}
-            className={`px-3 py-1 rounded-full font-bold transition-all ${
-              activePortal === 'customer'
-                ? 'bg-white text-black shadow-sm'
-                : 'text-neutral-400 hover:text-white'
-            }`}
-          >
-            Customer App
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePortal('courier')}
-            className={`px-3 py-1 rounded-full font-semibold transition-all ${
-              activePortal === 'courier'
-                ? 'bg-white text-black font-bold shadow-sm'
-                : 'text-neutral-400 hover:text-white'
-            }`}
-          >
-            Courier Feed
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePortal('admin')}
-            className={`px-2.5 sm:px-3 py-1 rounded-full font-semibold transition-all ${
-              activePortal === 'admin'
-                ? 'bg-white text-black font-bold shadow-sm'
-                : 'text-neutral-400 hover:text-white'
-            }`}
-          >
-            Admin
-          </button>
-        </div>
-      </header>
+      {/* 2. RIDERS PORTAL HEADER (/riders) */}
+      {activePortal === 'courier' && (
+        <header className="fixed top-0 left-0 right-0 z-40 h-13 bg-neutral-950 border-b border-neutral-800 px-4 sm:px-6 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-lg bg-amber-500 flex items-center justify-center text-black font-black text-xs shadow-sm">
+              <Bike className="h-4 w-4 text-black stroke-[2.5]" />
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="font-extrabold text-sm sm:text-base tracking-tight text-white">
+                SwiftAddis Courier
+              </span>
+              <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-800/50 font-bold px-2 py-0.5 rounded-full">
+                Riders Side
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => navigatePortal('customer')}
+              className="text-neutral-400 hover:text-white transition-colors flex items-center gap-1 font-semibold"
+            >
+              <span>User Side</span>
+              <ArrowUpRight className="h-3 w-3" />
+            </button>
+            <span className="text-neutral-700">|</span>
+            <button
+              type="button"
+              onClick={() => navigatePortal('admin')}
+              className="text-neutral-400 hover:text-white transition-colors flex items-center gap-1 font-semibold"
+            >
+              <span>Admin</span>
+              <ArrowUpRight className="h-3 w-3" />
+            </button>
+          </div>
+        </header>
+      )}
+
+      {/* 3. ADMIN PORTAL HEADER (/admin) */}
+      {activePortal === 'admin' && (
+        <header className="fixed top-0 left-0 right-0 z-40 h-13 bg-neutral-950 border-b border-neutral-800 px-4 sm:px-6 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="h-7 w-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-black text-xs shadow-sm">
+              <Shield className="h-4 w-4 text-white" />
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="font-extrabold text-sm sm:text-base tracking-tight text-white">
+                SwiftAddis Operations
+              </span>
+              <span className="text-[10px] bg-blue-950 text-blue-300 border border-blue-800/50 font-bold px-2 py-0.5 rounded-full">
+                Admin Console
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => navigatePortal('customer')}
+              className="text-neutral-400 hover:text-white transition-colors flex items-center gap-1 font-semibold"
+            >
+              <span>User Side</span>
+              <ArrowUpRight className="h-3 w-3" />
+            </button>
+            <span className="text-neutral-700">|</span>
+            <button
+              type="button"
+              onClick={() => navigatePortal('courier')}
+              className="text-neutral-400 hover:text-white transition-colors flex items-center gap-1 font-semibold"
+            >
+              <span>Riders Side</span>
+              <ArrowUpRight className="h-3 w-3" />
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* Floating Toast Notification */}
       {notification && (
@@ -121,11 +187,12 @@ export function App() {
       )}
 
       {/* Main Experience */}
-      <main className="w-full flex-1 flex flex-col pt-14">
+      <main className="w-full flex-1 flex flex-col pt-13">
+        {/* USERS SIDE */}
         {activePortal === 'customer' && (
           <div className="w-full flex-1 flex flex-col relative">
             {customerTab === 'book' && (
-              <div className="w-full h-[calc(100dvh-3.5rem)] relative overflow-hidden">
+              <div className="w-full h-[calc(100dvh-3.25rem)] relative overflow-hidden">
                 <MapBookingFlow
                   onOrderCreated={handleCreateDelivery}
                   onGoToDeliveries={() => setCustomerTab('deliveries')}
@@ -134,7 +201,7 @@ export function App() {
             )}
 
             {customerTab === 'deliveries' && (
-              <div className="w-full flex-1 min-h-[calc(100dvh-3.5rem)] bg-neutral-100 flex flex-col items-center p-3 sm:p-6 pb-20">
+              <div className="w-full flex-1 min-h-[calc(100dvh-3.25rem)] bg-neutral-100 flex flex-col items-center p-3 sm:p-6 pb-20">
                 <div className="w-full max-w-3xl flex-1">
                   <DeliveriesList
                     deliveries={deliveries}
@@ -145,14 +212,14 @@ export function App() {
             )}
 
             {customerTab === 'profile' && (
-              <div className="w-full flex-1 min-h-[calc(100dvh-3.5rem)] bg-neutral-100 flex flex-col items-center p-3 sm:p-6 pb-20">
+              <div className="w-full flex-1 min-h-[calc(100dvh-3.25rem)] bg-neutral-100 flex flex-col items-center p-3 sm:p-6 pb-20">
                 <div className="w-full max-w-xl flex-1">
-                  <CustomerProfile />
+                  <CustomerProfile onNavigate={navigatePortal} />
                 </div>
               </div>
             )}
 
-            {/* Mobile Bottom Navigation (Always accessible in Customer view) */}
+            {/* Mobile Bottom Navigation */}
             <MobileBottomNav
               activeTab={customerTab}
               onTabChange={setCustomerTab}
@@ -161,8 +228,9 @@ export function App() {
           </div>
         )}
 
+        {/* RIDERS SIDE */}
         {activePortal === 'courier' && (
-          <div className="w-full flex-1 min-h-[calc(100dvh-3.5rem)] bg-neutral-100 flex flex-col items-center p-3 sm:p-6 pb-12">
+          <div className="w-full flex-1 min-h-[calc(100dvh-3.25rem)] bg-neutral-100 flex flex-col items-center p-3 sm:p-6 pb-12">
             <div className="w-full max-w-2xl flex-1">
               <CourierJobBoardPreview
                 deliveries={deliveries}
@@ -172,8 +240,9 @@ export function App() {
           </div>
         )}
 
+        {/* ADMIN PAGE */}
         {activePortal === 'admin' && (
-          <div className="w-full flex-1 min-h-[calc(100dvh-3.5rem)] bg-neutral-100 flex flex-col items-center p-3 sm:p-6 pb-12">
+          <div className="w-full flex-1 min-h-[calc(100dvh-3.25rem)] bg-neutral-100 flex flex-col items-center p-3 sm:p-6 pb-12">
             <div className="w-full max-w-7xl flex-1">
               <AdminAuditPreview deliveries={deliveries} />
             </div>
