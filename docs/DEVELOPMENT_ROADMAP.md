@@ -27,6 +27,7 @@ graph TD
 - **Status**: Completed upon approval of documentation suite.
 - **Deliverables**:
   - `docs/MVP_SPEC.md`
+  - `docs/UX_CORE_SCREEN_FLOWS.md`
   - `docs/SYSTEM_ARCHITECTURE.md`
   - `docs/DATABASE_DESIGN.md`
   - `docs/DEVELOPMENT_ROADMAP.md`

@@ -5,16 +5,19 @@
 
 ## 1. Database Architecture & Technology
 
-The primary database is **PostgreSQL on Neon**, accessed through **Drizzle ORM** in a serverless environment via connection pooling (PgBouncer). The MVP pilot is **Addis Ababa only**. Use a **separate Neon development branch** for development and testing if branching is supported by the active Neon plan/project. If it is unavailable, create a separate development Neon project/database. Never point local development or test runs at production.
+The primary database is **PostgreSQL on Neon**, accessed through **Drizzle ORM** in a serverless environment via connection pooling (PgBouncer). 
+
+The MVP pilot is **Addis Ababa only**. Development and automated tests target an isolated **Neon development branch** (or separate development database) completely segregated from production. Never point local development or test runs at production.
 
 ### Confirmed MVP Financial and Product Decisions
-- Delivery fee payer is `sender` or `receiver` only; the selected person pays the rider directly.
-- Business accounts may create/manage bookings, but business-account billing, prepaid balances, credit lines, and consolidated invoicing are deferred.
-- Configurable test commission defaults are **15.00% for motorcycles** and **10.00% for bicycles**. These are pilot test values, not final commercial commitments.
-- No schema migration, DDL execution, or live database change is authorized by this document review.
+- **Payer Scope**: Delivery fee payer is strictly `sender` or `receiver`. The designated person pays the courier directly.
+- **Business Billing Deferred**: Business accounts may create and manage bookings, but centralized corporate credit lines, consolidated postpaid invoicing, and prepaid corporate balances are deferred.
+- **Commission Baselines**: Configurable seed test defaults are **15.00% for motorcycles** and **10.00% for bicycles**. These rates and the resulting calculated commission amount are snapshotted onto each delivery upon booking.
+- **Delivery vs Payment Decoupling**: Delivery completion (`delivered`) is unlocked exclusively by recipient OTP verification; electronic payment reconciliation (`verified`) is an accounting check that does not gate delivery handover or commission accrual.
+- **No Direct DDL / Migration Execution**: No live schema changes or DDL executions are authorized by this documentation specification.
 
 ### Key Architectural Standards
-1. **Primary Keys**: Universally unique identifiers (`UUIDv7` or `gen_random_uuid()`) for all relational entities. UUIDs are identifiers, not a substitute for authorization checks.
+1. **Primary Keys**: Universally unique identifiers (`UUIDv7` or `gen_random_uuid()`) for all relational entities to avoid enumeration attacks and simplify distributed data creation.
 2. **Monetary Precision**: All monetary values (fares, commissions, debts, settlements) are strictly typed as `NUMERIC(12, 2)`. Floating-point types (`FLOAT`, `REAL`, `DOUBLE PRECISION`) are prohibited.
 3. **Geographic Coordinates**: Stored as `NUMERIC(9, 6)` for latitude and longitude, providing accuracy down to ~11 centimeters, which is ideal for pickup/drop-off pins without requiring heavy external GIS extensions.
 4. **Time & Auditing**: Every table includes `created_at TIMESTAMPTZ DEFAULT NOW()` and `updated_at TIMESTAMPTZ DEFAULT NOW()`. Timestamps are always stored in UTC.
@@ -32,7 +35,7 @@ erDiagram
     BUSINESSES ||--o{ BUSINESS_MEMBERS : "has members"
     BUSINESSES ||--o{ DELIVERIES : "requests as business"
     DELIVERIES ||--o{ DELIVERY_STATUS_HISTORY : "tracks transitions"
-    DELIVERIES ||--o{ PAYMENTS : "has payment attempts/records"
+    DELIVERIES ||--o{ PAYMENTS : "has payment records"
     DELIVERIES ||--o{ COMMISSION_LEDGER : "accrues commission"
     RIDER_PROFILES ||--o{ COMMISSION_LEDGER : "has ledger entries"
     PRICING_RULES ||--o{ DELIVERIES : "calculates fare"
@@ -51,6 +54,9 @@ erDiagram
         uuid id PK
         varchar name
         varchar tin_number UK
+        varchar billing_type
+        numeric credit_limit
+        numeric current_balance
         varchar status
     }
 
@@ -60,18 +66,27 @@ erDiagram
         varchar vehicle_type
         varchar license_number
         varchar plate_number
+        text id_card_url
+        text license_doc_url
+        text ownership_doc_url
+        varchar emergency_contact_name
+        varchar emergency_contact_phone
         varchar verification_status
         boolean is_online
+        numeric current_debt
     }
 
     PRICING_RULES {
         uuid id PK
         varchar vehicle_type
+        varchar name
         numeric base_fare
         numeric rate_per_km
         numeric min_fare
         numeric max_distance_km
         numeric max_weight_kg
+        numeric cancellation_fee
+        numeric commission_pct
         boolean is_active
     }
 
@@ -79,71 +94,66 @@ erDiagram
         uuid id PK
         varchar tracking_number UK
         uuid customer_id FK
-        uuid business_id FK
         uuid rider_id FK
         varchar vehicle_type
         varchar status
-        numeric estimated_distance_km
+        varchar pickup_subcity
+        text pickup_landmark
+        varchar dropoff_subcity
+        text dropoff_landmark
         numeric fare_total
         numeric commission_amount
         numeric commission_rate_pct
         varchar payer_type
         varchar verification_otp_hash
-        timestamptz verification_otp_expires_at
-    }
-
-    DELIVERY_STATUS_HISTORY {
-        uuid id PK
-        uuid delivery_id FK
-        varchar from_status
-        varchar to_status
-        uuid changed_by_user_id FK
-        timestamptz created_at
+        varchar return_otp_hash
     }
 
     PAYMENTS {
         uuid id PK
         uuid delivery_id FK
+        varchar payment_type
+        uuid payer_user_id FK
+        uuid payee_rider_id FK
         numeric amount
         varchar payment_method
         varchar payment_status
         varchar transaction_reference
-        uuid verified_by_admin_id FK
     }
 
     COMMISSION_LEDGER {
         uuid id PK
         uuid rider_id FK
         uuid delivery_id FK
+        uuid settlement_request_id
         varchar entry_type
         numeric amount
         numeric balance_after
         varchar status
-        varchar reference_number
     }
 ```
 
 ---
 
-## 3. Table Schema Definitions
+## 3. Relational Schema Definitions
 
 ### 3.1 `users` Table
-Stores authentication identity and platform roles.
+Stores user credentials, phone identity, roles, and status.
 
 | Column | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | Primary Key, `DEFAULT gen_random_uuid()` | Unique user identifier |
-| `phone` | `VARCHAR(20)` | `NOT NULL`, `UNIQUE` | Ethiopian phone number (e.g., `+251911234567`) |
-| `email` | `VARCHAR(255)` | `UNIQUE`, `NULLABLE` | Optional for customers/riders, used by business accounts |
-| `password_hash` | `VARCHAR(255)` | `NULLABLE` | Used for email/password logins (business/admin) |
+| `phone` | `VARCHAR(20)` | `NOT NULL`, `UNIQUE` | Ethiopian phone number (`+251911234567`) |
+| `email` | `VARCHAR(255)` | `UNIQUE`, `NULLABLE` | Optional email identifier |
+| `password_hash` | `VARCHAR(255)` | `NULLABLE` | Optional password hash for business/admin staff |
 | `full_name` | `VARCHAR(100)` | `NOT NULL` | Legal full name |
 | `role` | `VARCHAR(20)` | `NOT NULL` | Enum: `customer`, `rider`, `business_staff`, `admin` |
 | `status` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'active'` | Enum: `active`, `suspended`, `pending_verification` |
-| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Account creation time |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Account creation timestamp |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Last update timestamp |
 
 ### 3.2 `businesses` Table
-Stores business profiles for business owners and authorized staff to create and track deliveries. In the MVP, this table does **not** implement billing balances, credit lines, or prepaid accounts; those are deferred. A business-created delivery still uses `payer_type = 'sender'` or `'receiver'`.
+Stores merchant and enterprise accounts (centralized billing deferred for MVP).
 
 | Column | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
@@ -151,13 +161,16 @@ Stores business profiles for business owners and authorized staff to create and 
 | `name` | `VARCHAR(150)` | `NOT NULL` | Registered trading name |
 | `tin_number` | `VARCHAR(50)` | `NOT NULL`, `UNIQUE` | Ethiopian Tax Identification Number |
 | `contact_phone` | `VARCHAR(20)` | `NOT NULL` | Official business phone |
-| `contact_email` | `VARCHAR(255)` | `NOT NULL` | Billing/notification email |
+| `contact_email` | `VARCHAR(255)` | `NOT NULL` | Notification email |
+| `billing_type` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'prepaid'` | Enum: `prepaid`, `postpaid_credit` |
+| `credit_limit` | `NUMERIC(12, 2)` | `NOT NULL`, `DEFAULT 0.00` | Approved credit limit in ETB |
+| `current_balance`| `NUMERIC(12, 2)` | `NOT NULL`, `DEFAULT 0.00` | Accrued balance in ETB |
 | `status` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'active'` | Enum: `active`, `suspended`, `closed` |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Creation timestamp |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Last modification timestamp |
 
 ### 3.3 `business_members` Table
-Associates authorized staff with a corporate business account.
+Associates authorized staff with a business account.
 
 | Column | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
@@ -167,106 +180,121 @@ Associates authorized staff with a corporate business account.
 | `member_role` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'staff'` | Enum: `owner`, `manager`, `staff` |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Date added |
 
-*Index: `UNIQUE(business_id, user_id)`*
+*Constraint: `UNIQUE(business_id, user_id)`*
 
 ### 3.4 `rider_profiles` Table
-Stores verification, vehicle details, online status, and location for couriers.
+Stores courier verification, vehicle compliance documents, location, and debt summary.
 
 | Column | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | Primary Key, `DEFAULT gen_random_uuid()` | Profile identifier |
 | `user_id` | `UUID` | `NOT NULL`, `UNIQUE`, `REFERENCES users(id) ON DELETE CASCADE` | Associated user |
 | `vehicle_type` | `VARCHAR(20)` | `NOT NULL` | Enum: `motorcycle`, `bicycle` |
-| `license_number` | `VARCHAR(50)` | `NULLABLE` | Driving license number (motorcycles) |
-| `plate_number` | `VARCHAR(30)` | `NULLABLE` | Motorcycle vehicle registration plate |
+| `license_number`| `VARCHAR(50)` | `NULLABLE` | Driver's license number (motorcycle) |
+| `plate_number` | `VARCHAR(30)` | `NULLABLE` | License plate registration (motorcycle) |
 | `id_card_url` | `TEXT` | `NOT NULL` | Kebele ID / National ID document image URL |
-| `license_doc_url` | `TEXT` | `NULLABLE` | Driver license image URL (motorcycle) |
-| `verification_status` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'pending'` | Enum: `pending`, `approved`, `rejected`, `suspended` |
+| `license_doc_url`| `TEXT` | `NULLABLE` | Driver's license document image URL (motorcycle) |
+| `ownership_doc_url`| `TEXT` | `NULLABLE` | Vehicle Libre registration booklet image URL (motorcycle) |
+| `emergency_contact_name`| `VARCHAR(100)`| `NOT NULL` | Mandatory emergency contact person |
+| `emergency_contact_phone`| `VARCHAR(20)`| `NOT NULL` | Mandatory emergency contact phone |
+| `verification_status`| `VARCHAR(20)`| `NOT NULL`, `DEFAULT 'pending'` | Enum: `pending`, `approved`, `rejected`, `suspended` |
 | `verified_at` | `TIMESTAMPTZ` | `NULLABLE` | Timestamp of admin approval |
-| `verified_by_admin_id`| `UUID` | `NULLABLE`, `REFERENCES users(id)` | Reviewing admin |
+| `verified_by_admin_id`| `UUID` | `NULLABLE`, `REFERENCES users(id)` | Reviewing administrator |
 | `is_online` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | Availability flag for job broadcasts |
-| `last_known_lat` | `NUMERIC(9, 6)` | `NULLABLE` | Current latitude |
-| `last_known_lng` | `NUMERIC(9, 6)` | `NULLABLE` | Current longitude |
-| `last_location_at` | `TIMESTAMPTZ` | `NULLABLE` | Timestamp of last location update |
-| `current_debt` | `NUMERIC(12, 2)` | Optional cached/derived value only | Prefer deriving outstanding commission from `commission_ledger`; if a cache is retained, update transactionally and reconcile it. The ledger remains the source of truth. |
+| `last_known_lat`| `NUMERIC(9, 6)` | `NULLABLE` | Last reported latitude |
+| `last_known_lng`| `NUMERIC(9, 6)` | `NULLABLE` | Last reported longitude |
+| `last_location_at`| `TIMESTAMPTZ`| `NULLABLE` | Timestamp of last location ping |
+| `current_debt` | `NUMERIC(12, 2)`| `NOT NULL`, `DEFAULT 0.00` | Cached debt balance owed to platform (ledger is source of truth) |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Registration timestamp |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Last update timestamp |
 
 ### 3.5 `pricing_rules` Table
-Stores vehicle pricing parameters configurable by administrators.
-
-Seed/test commission values for the Addis Ababa pilot: `motorcycle = 15.00%`, `bicycle = 10.00%`. Keep the rate configurable, and snapshot the applied rate and amount on each delivery so later rule changes do not rewrite historical calculations.
+Stores vehicle pricing parameters configurable by administrators for Addis Ababa.
 
 | Column | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | Primary Key, `DEFAULT gen_random_uuid()` | Rule identifier |
 | `vehicle_type` | `VARCHAR(20)` | `NOT NULL` | Enum: `motorcycle`, `bicycle` |
 | `name` | `VARCHAR(100)` | `NOT NULL` | e.g., "Addis Standard Motorcycle 2026" |
-| `base_fare` | `NUMERIC(12, 2)` | `NOT NULL` | Fixed starting charge (ETB) |
+| `base_fare` | `NUMERIC(12, 2)` | `NOT NULL` | Starting base charge (ETB) |
 | `rate_per_km` | `NUMERIC(12, 2)` | `NOT NULL` | Distance rate per kilometer (ETB) |
 | `min_fare` | `NUMERIC(12, 2)` | `NOT NULL` | Absolute minimum delivery charge (ETB) |
 | `max_distance_km`| `NUMERIC(6, 2)` | `NOT NULL` | Max permitted trip distance (km) |
 | `max_weight_kg` | `NUMERIC(6, 2)` | `NOT NULL` | Max package weight (kg) |
-| `cancellation_fee`| `NUMERIC(12, 2)` | `NOT NULL` | Fee charged if cancelled post-arrival |
-| `commission_pct` | `NUMERIC(5, 2)` | `NOT NULL` | Configurable platform commission percentage; seed test defaults: motorcycle `15.00`, bicycle `10.00` |
+| `cancellation_fee`| `NUMERIC(12, 2)` | `NOT NULL` | Fee charged if cancelled post-arrival (ETB) |
+| `commission_pct` | `NUMERIC(5, 2)` | `NOT NULL` | Platform commission rate (e.g., 15.00% motorcycle, 10.00% bicycle) |
 | `is_active` | `BOOLEAN` | `NOT NULL`, `DEFAULT true` | Only one active rule per vehicle type |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Rule creation timestamp |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Last update timestamp |
 
 ### 3.6 `deliveries` Table
-Core transactional entity representing delivery requests and orders.
+Core transactional entity representing point-to-point delivery orders.
 
 | Column | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | Primary Key, `DEFAULT gen_random_uuid()` | Delivery identifier |
-| `tracking_number`| `VARCHAR(25)` | `NOT NULL`, `UNIQUE` | Human-friendly code (e.g. `ET-DEL-91823`) |
+| `tracking_number`| `VARCHAR(25)` | `NOT NULL`, `UNIQUE` | Human-friendly code (e.g., `ET-DEL-91823`) |
 | `customer_id` | `UUID` | `NOT NULL`, `REFERENCES users(id)` | Order creator |
-| `business_id` | `UUID` | `NULLABLE`, `REFERENCES businesses(id)` | Corporate account (if booked for a business) |
+| `business_id` | `UUID` | `NULLABLE`, `REFERENCES businesses(id)` | Associated business account (if applicable) |
 | `rider_id` | `UUID` | `NULLABLE`, `REFERENCES users(id)` | Assigned courier |
 | `vehicle_type` | `VARCHAR(20)` | `NOT NULL` | Enum: `motorcycle`, `bicycle` |
-| `status` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'requested'` | State machine enum |
-| `pickup_address` | `TEXT` | `NOT NULL` | Street / Area description |
+| `status` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'requested'` | Enum: `requested`, `assigned`, `arrived_pickup`, `picked_up`, `arrived_dropoff`, `delivered`, `failed`, `returned`, `cancelled` |
+| `pickup_address` | `TEXT` | `NOT NULL` | Descriptive pickup street/area |
 | `pickup_landmark`| `TEXT` | `NOT NULL` | Known landmark for pickup |
-| `pickup_subcity` | `VARCHAR(50)` | `NOT NULL` | e.g., Bole, Kirkos, Yeka |
+| `pickup_subcity` | `VARCHAR(50)` | `NOT NULL` | Bole, Kirkos, Yeka, etc. |
 | `pickup_woreda` | `VARCHAR(20)` | `NULLABLE` | Local district number |
-| `pickup_lat` | `NUMERIC(9, 6)` | `NULLABLE` | Pickup latitude pin |
-| `pickup_lng` | `NUMERIC(9, 6)` | `NULLABLE` | Pickup longitude pin |
+| `pickup_lat` | `NUMERIC(9, 6)` | `NULLABLE` | Pickup latitude coordinate |
+| `pickup_lng` | `NUMERIC(9, 6)` | `NULLABLE` | Pickup longitude coordinate |
 | `pickup_contact_name`| `VARCHAR(100)`| `NOT NULL` | Sender contact person |
 | `pickup_contact_phone`| `VARCHAR(20)`| `NOT NULL` | Sender contact phone |
-| `dropoff_address`| `TEXT` | `NOT NULL` | Destination street / area description |
+| `dropoff_address`| `TEXT` | `NOT NULL` | Descriptive drop-off street/area |
 | `dropoff_landmark`| `TEXT` | `NOT NULL` | Known landmark for drop-off |
 | `dropoff_subcity`| `VARCHAR(50)` | `NOT NULL` | Destination sub-city |
 | `dropoff_woreda` | `VARCHAR(20)` | `NULLABLE` | Destination woreda |
-| `dropoff_lat` | `NUMERIC(9, 6)` | `NULLABLE` | Drop-off latitude pin |
-| `dropoff_lng` | `NUMERIC(9, 6)` | `NULLABLE` | Drop-off longitude pin |
+| `dropoff_lat` | `NUMERIC(9, 6)` | `NULLABLE` | Drop-off latitude coordinate |
+| `dropoff_lng` | `NUMERIC(9, 6)` | `NULLABLE` | Drop-off longitude coordinate |
 | `dropoff_contact_name`| `VARCHAR(100)`| `NOT NULL` | Recipient contact person |
 | `dropoff_contact_phone`| `VARCHAR(20)`| `NOT NULL` | Recipient contact phone |
-| `package_description`| `TEXT` | `NOT NULL` | Brief contents description |
+| `package_description`| `TEXT` | `NOT NULL` | Parcel contents description |
 | `package_category`| `VARCHAR(50)` | `NOT NULL` | Document, Electronics, Clothes, etc. |
-| `package_weight_kg`| `NUMERIC(6, 2)`| `NOT NULL` | Estimated parcel weight |
-| `is_fragile` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | Handling requirement flag |
-| `special_instructions`| `TEXT` | `NULLABLE` | Specific notes for courier |
+| `package_weight_kg`| `NUMERIC(6, 2)`| `NOT NULL` | Parcel weight |
+| `is_fragile` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | Fragile handling flag |
+| `special_instructions`| `TEXT` | `NULLABLE` | Courier handling notes |
 | `estimated_distance_km`| `NUMERIC(6, 2)`| `NOT NULL` | Billed trip distance |
 | `fare_base` | `NUMERIC(12, 2)`| `NOT NULL` | Base fare component (ETB) |
 | `fare_distance` | `NUMERIC(12, 2)`| `NOT NULL` | Distance fare component (ETB) |
 | `fare_surcharges`| `NUMERIC(12, 2)`| `NOT NULL`, `DEFAULT 0.00` | Surcharges (ETB) |
 | `fare_total` | `NUMERIC(12, 2)`| `NOT NULL` | Final total delivery fee (ETB) |
-| `commission_amount`| `NUMERIC(12, 2)`| `NOT NULL` | Commission amount snapshot calculated for this delivery (ETB) |
-| `commission_rate_pct` | `NUMERIC(5, 2)` | `NOT NULL` | Commission rate snapshot at booking/pricing confirmation, e.g. 15.00 or 10.00 |
-| `payer_type` | `VARCHAR(20)` | `NOT NULL` | Enum: `sender`, `receiver` only for MVP; business billing deferred |
-| `verification_otp_hash`| `VARCHAR(255)`| `NOT NULL` | Secure OTP verifier/hash; use a keyed or password-style verifier appropriate to the OTP implementation, not plain SHA-256 alone |
-| `verification_otp_expires_at` | `TIMESTAMPTZ` | `NOT NULL` | OTP expiry timestamp |
-| `verification_otp_used_at` | `TIMESTAMPTZ` | `NULLABLE` | Set when OTP is successfully used; prevents reuse |
-| `verification_attempts`| `INT` | `NOT NULL`, `DEFAULT 0` | Failed OTP entry counter; enforce a strict server-side attempt limit and rate limiting |
+| `commission_amount`| `NUMERIC(12, 2)`| `NOT NULL` | Commission snapshot for this delivery (ETB) |
+| `commission_rate_pct`| `NUMERIC(5, 2)`| `NOT NULL` | Commission rate snapshot (15.00 or 10.00) |
+| `payer_type` | `VARCHAR(20)` | `NOT NULL` | Enum: `sender`, `receiver` (business billing deferred) |
+| `verification_otp_hash`| `VARCHAR(255)`| `NULLABLE` | Peppered HMAC-SHA256 verifier for recipient handover; generated at picked_up |
+| `verification_otp_salt`| `VARCHAR(64)` | `NULLABLE` | Unique salt for recipient OTP; generated at picked_up |
+| `verification_otp_expires_at`| `TIMESTAMPTZ`| `NULLABLE` | Handover OTP expiry timestamp; set at picked_up (60-minute window) |
+| `verification_otp_used_at`| `TIMESTAMPTZ`| `NULLABLE` | Handover OTP usage timestamp; set at delivered |
+| `verification_attempts`| `INT` | `NOT NULL`, `DEFAULT 0` | Failed handover OTP counter (max 5) |
+| `verification_locked`| `BOOLEAN` | `NOT NULL`, `DEFAULT false` | Handover lockout flag |
+| `return_otp_hash`| `VARCHAR(255)`| `NULLABLE` | Peppered HMAC-SHA256 verifier for sender return; generated at failed |
+| `return_otp_salt`| `VARCHAR(64)` | `NULLABLE` | Unique salt for return OTP; generated at failed |
+| `return_otp_expires_at`| `TIMESTAMPTZ`| `NULLABLE` | Return OTP expiry timestamp; set at failed (60-minute window) |
+| `return_otp_used_at`| `TIMESTAMPTZ`| `NULLABLE` | Return OTP usage timestamp; set at returned |
+| `return_otp_attempts`| `INT` | `NOT NULL`, `DEFAULT 0` | Failed return OTP counter (max 5) |
+| `return_otp_locked`| `BOOLEAN` | `NOT NULL`, `DEFAULT false` | Return lockout flag |
+| `cancelled_by_user_id`| `UUID` | `NULLABLE`, `REFERENCES users(id)` | User who triggered cancellation |
+| `cancellation_reason`| `TEXT` | `NULLABLE` | Mandatory reason note on cancel |
+| `cancellation_fee`| `NUMERIC(12, 2)`| `NOT NULL`, `DEFAULT 0.00` | Fee billed if cancelled post-arrival |
 | `requested_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Broadcast timestamp |
-| `assigned_at` | `TIMESTAMPTZ` | `NULLABLE` | Courier assignment timestamp |
+| `assigned_at` | `TIMESTAMPTZ` | `NULLABLE` | Assignment timestamp |
 | `arrived_pickup_at`| `TIMESTAMPTZ`| `NULLABLE` | Pickup arrival timestamp |
-| `picked_up_at` | `TIMESTAMPTZ` | `NULLABLE` | Handover timestamp |
+| `picked_up_at` | `TIMESTAMPTZ` | `NULLABLE` | Package collection timestamp |
 | `arrived_dropoff_at`| `TIMESTAMPTZ`| `NULLABLE` | Destination arrival timestamp |
-| `delivered_at` | `TIMESTAMPTZ` | `NULLABLE` | Completed delivery timestamp |
+| `delivered_at` | `TIMESTAMPTZ` | `NULLABLE` | Delivery completion timestamp |
 | `cancelled_at` | `TIMESTAMPTZ` | `NULLABLE` | Cancellation timestamp |
-| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
-| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record update timestamp |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Creation timestamp |
+| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Modification timestamp |
+
+> [!NOTE]
+> Dedicated timestamps `failed_at` and `returned_at` are an optional schema choice deferred to Stage 2. All status transitions are fully recorded with timestamps, actor IDs, operational notes, and GPS coordinates in `delivery_status_history`.
 
 ### 3.7 `delivery_status_history` Table
 Immutable chronological audit log of all delivery lifecycle state transitions.
@@ -277,44 +305,63 @@ Immutable chronological audit log of all delivery lifecycle state transitions.
 | `delivery_id` | `UUID` | `NOT NULL`, `REFERENCES deliveries(id) ON DELETE CASCADE` | Associated delivery |
 | `from_status` | `VARCHAR(20)` | `NULLABLE` | Previous state |
 | `to_status` | `VARCHAR(20)` | `NOT NULL` | New state |
-| `changed_by_user_id`| `UUID` | `NOT NULL`, `REFERENCES users(id)` | Actor triggering transition |
-| `notes` | `TEXT` | `NULLABLE` | Optional explanation or reason |
-| `lat` | `NUMERIC(9, 6)` | `NULLABLE` | GPS latitude at moment of transition |
-| `lng` | `NUMERIC(9, 6)` | `NULLABLE` | GPS longitude at moment of transition |
-| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Transition timestamp |
+| `changed_by_user_id`| `UUID` | `NOT NULL`, `REFERENCES users(id)` | Actor triggering transition (courier, customer, or admin) |
+| `notes` | `TEXT` | `NULLABLE` | Reason, cancellation notes, failure reasons, or override details |
+| `lat` | `NUMERIC(9, 6)` | `NULLABLE` | Latitude at transition |
+| `lng` | `NUMERIC(9, 6)` | `NULLABLE` | Longitude at transition |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Timestamp of state change |
+
+> [!IMPORTANT]
+> **Audit Storage & Telemetry Persistence**:
+> All lifecycle state transitions (including return confirmations, cancellations, and administrative overrides) persist their audit trail strictly within the fields specified above:
+> - **Actor**: `changed_by_user_id` (UUID of courier, sender, or admin).
+> - **Timestamp**: `created_at` (`TIMESTAMPTZ DEFAULT NOW()`).
+> - **Reason / Justification**: `notes` (`TEXT`, mandatory for cancellations, failure reports, and administrative return overrides).
+> - **Location**: `lat` and `lng` (geographic coordinates captured at time of transition).
+> 
+> *Client IP addresses and User-Agent strings are NOT stored as dedicated columns in `delivery_status_history`.* Any operational request metadata captured by the API gateway is recorded in server request logs or optionally embedded within the unstructured `notes` text field, matching the documented schema without claiming non-existent columns.
 
 ### 3.8 `payments` Table
-Records direct sender/receiver-to-rider delivery fee collection evidence. No payment-provider checkout or platform escrow is in scope for the MVP. The platform does not hold the customer payment. Multiple records per delivery are allowed for retries, corrections, partial attempts, or disputes; application logic must prevent duplicate successful collection of the same fee. A delivery can be completed after valid proof of handover even if an electronic payment record remains `collected_unverified`; that payment status is reconciled separately.
+Records direct payer-to-courier delivery fee, cancellation fee, and return fare collections. Multiple records per delivery are permitted for retries, corrections, partial attempts, or disputes. Application logic and database-level partial unique indexes prevent duplicate collections.
 
 | Column | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | Primary Key, `DEFAULT gen_random_uuid()` | Payment record identifier |
-| `delivery_id` | `UUID` | `NOT NULL`, `REFERENCES deliveries(id)` | Associated delivery; intentionally not unique so multiple payment records/attempts can be retained |
-| `payer_user_id` | `UUID` | `NULLABLE`, `REFERENCES users(id)` | Payer account (if known) |
-| `payee_rider_id`| `UUID` | `NOT NULL`, `REFERENCES users(id)` | Courier receiving the payment |
-| `amount` | `NUMERIC(12, 2)`| `NOT NULL` | Total collected fee (ETB) |
+| `delivery_id` | `UUID` | `NOT NULL`, `REFERENCES deliveries(id)` | Associated delivery (non-unique to allow multiple attempts/types) |
+| `payment_type` | `VARCHAR(30)` | `NOT NULL`, `DEFAULT 'delivery_fare'` | Enum: `delivery_fare`, `cancellation_fee`, `return_fare` |
+| `payer_user_id` | `UUID` | `NULLABLE`, `REFERENCES users(id)` | Payer account (NULL for unregistered recipients/payers) |
+| `payee_rider_id`| `UUID` | `NOT NULL`, `REFERENCES users(id)` | Courier receiving payment |
+| `amount` | `NUMERIC(12, 2)`| `NOT NULL` | Collected fee in ETB |
 | `payment_method`| `VARCHAR(20)` | `NOT NULL` | Enum: `cash`, `telebirr`, `cbe_birr` |
-| `payment_status`| `VARCHAR(30)` | `NOT NULL` | Enum: `pending`, `collected_unverified`, `collected_cash_rider_confirmed`, `verified`, `disputed`, `failed`, `reversed` |
+| `payment_status`| `VARCHAR(30)` | `NOT NULL` | Enum: `pending`, `collected_cash_rider_confirmed`, `collected_unverified`, `verified`, `refused_uncollected`, `disputed`, `failed`, `reversed` |
 | `transaction_reference`| `VARCHAR(100)`| `NULLABLE` | Telebirr / CBE transaction SMS reference code |
 | `proof_image_url`| `TEXT` | `NULLABLE` | Screenshot of SMS receipt |
-| `verified_by_admin_id`| `UUID` | `NULLABLE`, `REFERENCES users(id)` | Admin verifying the reference |
-| `verified_at` | `TIMESTAMPTZ` | `NULLABLE` | Verification timestamp |
-| `notes` | `TEXT` | `NULLABLE` | Payment audit notes |
+| `verified_by_admin_id`| `UUID` | `NULLABLE`, `REFERENCES users(id)` | Reviewing administrator |
+| `verified_at` | `TIMESTAMPTZ` | `NULLABLE` | Statement verification timestamp |
+| `notes` | `TEXT` | `NULLABLE` | Audit notes or dispute details |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record update timestamp |
 
+> [!NOTE]
+> **Payment Types & Segregated Accounting**:
+> - `payment_type = 'delivery_fare'`: Ordinary fare for completed trip. Subject to standard platform commission upon `delivered`. Guarded by `idx_payments_single_successful_delivery_fare`.
+> - `payment_type = 'cancellation_fee'`: Post-arrival cancellation fee (25 ETB bicycle / 40 ETB motorcycle) owed by sender after courier arrives at pickup (`arrived_pickup`). **100% of this fee belongs to the courier with 0% platform commission** (never accrues commission debt). Guarded by `idx_payments_single_cancellation_fee`.
+> - `payment_type = 'return_fare'`: Original delivery fare due from sender when delivery ends in `failed` $\rightarrow$ `returned`. Zero platform commission is debited while in dispute. If unpaid, recorded as `refused_uncollected` or `disputed` without violating payment uniqueness rules (since partial unique indexes cover only successful statuses: `collected_cash_rider_confirmed`, `collected_unverified`, `verified`). Guarded by `idx_payments_single_return_fare`.
+> - **Uniqueness Isolation**: Storing `payment_type` ensures cancellation fees and return fares never overwrite, confuse, or violate uniqueness constraints on ordinary delivery fees.
+
 ### 3.9 `commission_ledger` Table
-Append-only ledger tracking platform commission owed by couriers and manual settlements. The ledger is the source of truth for outstanding commission; any cached balance on `rider_profiles` is derived and must be reconciled against ledger entries.
+Append-only source of truth tracking platform commission owed by couriers and manual settlements.
 
 | Column | Data Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | Primary Key, `DEFAULT gen_random_uuid()` | Ledger record identifier |
 | `rider_id` | `UUID` | `NOT NULL`, `REFERENCES users(id)` | Courier account |
-| `delivery_id` | `UUID` | `NULLABLE`, `REFERENCES deliveries(id)` | Associated delivery (if fee accrual) |
+| `delivery_id` | `UUID` | `NULLABLE`, `REFERENCES deliveries(id)` | Associated delivery (if commission accrual) |
+| `settlement_request_id`| `UUID`| `NULLABLE` | Associated settlement request (if payment) |
 | `entry_type` | `VARCHAR(30)` | `NOT NULL` | Enum: `commission_accrual`, `settlement_payment`, `adjustment`, `penalty` |
 | `amount` | `NUMERIC(12, 2)`| `NOT NULL` | Amount in ETB (positive = debt increased, negative = debt paid off) |
-| `balance_after` | `NUMERIC(12, 2)`| `NOT NULL` | Snapshot of rider's total debt balance after this entry |
-| `status` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'accrued'` | Enum: `accrued`, `pending_verification`, `settled`, `voided` |
+| `balance_after` | `NUMERIC(12, 2)`| `NOT NULL` | Snapshot of courier's total debt balance after this entry |
+| `status` | `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'accrued'` | Enum: `accrued`, `settled`, `voided` |
 | `reference_number`| `VARCHAR(100)`| `NULLABLE` | Bank / Telebirr settlement reference |
 | `settled_by_admin_id`| `UUID` | `NULLABLE`, `REFERENCES users(id)` | Approving administrator |
 | `notes` | `TEXT` | `NULLABLE` | Settlement details or reason for adjustment |
@@ -322,72 +369,194 @@ Append-only ledger tracking platform commission owed by couriers and manual sett
 
 ---
 
-### Delivery and Payment Integrity Notes
-- `deliveries.payer_type` is restricted to `sender` or `receiver`; there is no `business_account` payer or `business_credit` payment method in the MVP.
-- `pricing_rules.commission_pct` seeds are 15.00 for motorcycle and 10.00 for bicycle. The selected rate and calculated commission amount are copied onto each delivery as snapshots so later pricing changes do not alter completed or in-flight historical amounts.
-- The Addis Ababa-only pilot scope is an application/business rule. Do not seed pricing rules for other cities until expansion is approved.
-- Payment collection verification and delivery completion are separate state concerns. OTP confirms recipient handover; it does not prove an electronic transfer cleared.
-
 ## 4. Concurrency & Integrity Control
 
-### 4.1 Atomic Job Claiming (No Double-Assignment)
-To prevent race conditions when multiple couriers tap "Accept" simultaneously, we utilize PostgreSQL's row-level locking:
+### 4.1 Atomic Job Claiming & Concurrency Guard
+Prevents duplicate assignments and enforces that a courier may only hold **one active delivery** across all non-terminal states (`assigned`, `arrived_pickup`, `picked_up`, `arrived_dropoff`, and `failed`). 
+
+Because locking delivery rows alone cannot lock anything if the courier currently holds 0 deliveries, concurrency control begins with a **courier-level row lock on `rider_profiles`**, backed by a database-level partial unique index:
 
 ```sql
 BEGIN;
 
--- Lock the target row and ensure status is still 'requested'
-SELECT id 
-FROM deliveries 
-WHERE id = :delivery_id 
-  AND status = 'requested' 
-  AND rider_id IS NULL
+-- 1. Courier-Level Lock: Serialize all claim operations for this specific courier
+-- Because every registered courier has exactly 1 row in rider_profiles, FOR UPDATE always acquires a lock
+SELECT user_id, verification_status, current_debt 
+FROM rider_profiles 
+WHERE user_id = :claiming_rider_id 
 FOR UPDATE;
 
--- If row is locked successfully and exists:
+-- 2. Verify courier vetting status
+-- If verification_status != 'approved': ROLLBACK and return 403 Forbidden: 'Courier not approved'.
+
+-- 3. Verify courier debt ceiling: verified debt must be strictly under 500.00 ETB
+-- If current_debt >= 500.00 ETB: ROLLBACK and return 403 Forbidden: 'Debt ceiling reached (>= 500 ETB)'.
+
+-- 4. Verify courier currently holds ZERO active deliveries
+SELECT id FROM deliveries 
+WHERE rider_id = :claiming_rider_id 
+  AND status IN ('assigned', 'arrived_pickup', 'picked_up', 'arrived_dropoff', 'failed')
+LIMIT 1;
+-- If any row exists: ROLLBACK and return 409 Conflict: 'Courier already has an active delivery'.
+
+-- 5. Lock and atomically claim the target delivery
 UPDATE deliveries
 SET status = 'assigned',
     rider_id = :claiming_rider_id,
     assigned_at = NOW(),
     updated_at = NOW()
-WHERE id = :delivery_id;
+WHERE id = :delivery_id 
+  AND status = 'requested' 
+  AND rider_id IS NULL
+RETURNING id;
+-- If 0 rows updated: ROLLBACK and return 409 Conflict: 'Job already claimed or unavailable'.
 
--- Record the status transition audit log
+-- 6. Record audit history
 INSERT INTO delivery_status_history (
     delivery_id, from_status, to_status, changed_by_user_id, notes
 ) VALUES (
-    :delivery_id, 'requested', 'assigned', :claiming_rider_id, 'Job claimed by rider'
+    :delivery_id, 'requested', 'assigned', :claiming_rider_id, 'Job claimed by courier'
 );
 
 COMMIT;
 ```
 
-If the `SELECT ... FOR UPDATE` yields no row (meaning another transaction acquired the lock first and mutated the status), the transaction immediately rolls back and returns a conflict error.
+### 4.2 Idempotent Commission Accrual on Delivery Handover
+Ensures that the commission ledger debit occurs **only when the `arrived_dropoff` $\rightarrow$ `delivered` transition succeeds** and the recipient OTP is verified.
+
+To prevent concurrent financial operations from computing corrupt `balance_after` snapshots, the transaction **locks the courier's `rider_profiles` row** to serialize balance updates per courier. The state update and ledger debit are linked via an atomic CTE so that the ledger insert executes if and only if the delivery row update succeeds:
+
+```sql
+BEGIN;
+
+-- 1. Serialize ledger balance updates per courier by acquiring row-level lock
+SELECT user_id, current_debt 
+FROM rider_profiles 
+WHERE user_id = :rider_id 
+FOR UPDATE;
+
+-- 2. Atomic CTE: Advance status to 'delivered' AND conditionally insert commission accrual
+-- The CTE guarantees that commission_ledger is touched IF AND ONLY IF the delivery row
+-- matched status = 'arrived_dropoff' and the unexpired, unused recipient OTP was validated.
+WITH delivery_update AS (
+    UPDATE deliveries
+    SET status = 'delivered',
+        delivered_at = NOW(),
+        verification_otp_used_at = NOW(),
+        updated_at = NOW()
+    WHERE id = :delivery_id 
+      AND status = 'arrived_dropoff'
+      AND rider_id = :rider_id
+      AND verification_locked = false
+      AND verification_otp_expires_at > NOW()
+      AND verification_otp_used_at IS NULL
+      AND verification_otp_hash = :calculated_hmac_hash
+    RETURNING id, rider_id, commission_amount
+),
+ledger_insert AS (
+    INSERT INTO commission_ledger (
+        rider_id, 
+        delivery_id, 
+        entry_type, 
+        amount, 
+        balance_after, 
+        status,
+        notes
+    )
+    SELECT 
+        du.rider_id, 
+        du.id, 
+        'commission_accrual', 
+        du.commission_amount,
+        (SELECT COALESCE(balance_after, 0.00) 
+         FROM commission_ledger 
+         WHERE rider_id = du.rider_id 
+         ORDER BY created_at DESC, id DESC LIMIT 1) + du.commission_amount,
+        'accrued',
+        'Platform commission on delivery completion'
+    FROM delivery_update du
+    ON CONFLICT (delivery_id) WHERE entry_type = 'commission_accrual' DO NOTHING
+    RETURNING id, rider_id, balance_after
+),
+profile_update AS (
+    UPDATE rider_profiles rp
+    SET current_debt = li.balance_after,
+        updated_at = NOW()
+    FROM ledger_insert li
+    WHERE rp.user_id = li.rider_id
+    RETURNING rp.user_id
+)
+INSERT INTO delivery_status_history (
+    delivery_id, from_status, to_status, changed_by_user_id, notes
+)
+SELECT 
+    du.id, 'arrived_dropoff', 'delivered', du.rider_id, 'Recipient OTP verified; physical handover complete'
+FROM delivery_update du;
+
+-- 3. Application Verification & Branching Logic:
+-- IF 0 rows returned from delivery_update:
+--   a) Query current delivery state:
+--      - If status is already 'delivered': 
+--          ROLLBACK; return 200 OK (idempotent duplicate request; delivery already verified).
+--      - If status is 'arrived_dropoff': OTP failed / expired / locked.
+--          Increment failed attempts counter:
+--          UPDATE deliveries 
+--          SET verification_attempts = verification_attempts + 1,
+--              verification_locked = (verification_attempts + 1 >= 5),
+--              updated_at = NOW()
+--          WHERE id = :delivery_id;
+--          COMMIT;
+--          Return 400 Bad Request: 'Invalid or expired OTP'.
+--      - Otherwise:
+--          ROLLBACK; return 409 Conflict: 'Invalid delivery state'.
+-- IF 1 row returned (successful transition):
+COMMIT;
+-- Return 200 OK: Delivery completed and commission debited.
+```
 
 ---
 
-## 5. Performance Indexes & Constraints
+## 5. Performance Indexes & Database-Level Constraints
 
 ```sql
 -- Fast lookup of available deliveries on the Job Board
 CREATE INDEX idx_deliveries_job_board 
-ON deliveries (status, vehicle_type, requested_at DESC) 
+ON deliveries (vehicle_type, status, created_at DESC) 
 WHERE status = 'requested';
 
--- Fast lookup of a user's active and historical orders
-CREATE INDEX idx_deliveries_customer 
-ON deliveries (customer_id, created_at DESC);
-
--- Fast lookup of a rider's assigned deliveries
-CREATE INDEX idx_deliveries_rider 
+-- Fast lookup of active deliveries per rider
+CREATE INDEX idx_deliveries_active_rider 
 ON deliveries (rider_id, status) 
 WHERE rider_id IS NOT NULL;
 
--- Fast tracking code resolution
+-- Unique tracking numbers
 CREATE UNIQUE INDEX idx_deliveries_tracking_number 
 ON deliveries (tracking_number);
 
--- Payment history / retry records for a delivery
+-- Database-Level Concurrency Guard: Enforce exactly zero or one active delivery per courier
+CREATE UNIQUE INDEX idx_single_active_delivery_per_rider 
+ON deliveries (rider_id) 
+WHERE status IN ('assigned', 'arrived_pickup', 'picked_up', 'arrived_dropoff', 'failed');
+
+-- Enforce exactly one successful payment collection per ordinary delivery fee
+CREATE UNIQUE INDEX idx_payments_single_successful_delivery_fare 
+ON payments (delivery_id) 
+WHERE payment_type = 'delivery_fare' 
+  AND payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified');
+
+-- Enforce exactly one successful cancellation fee collection per delivery
+CREATE UNIQUE INDEX idx_payments_single_cancellation_fee 
+ON payments (delivery_id) 
+WHERE payment_type = 'cancellation_fee' 
+  AND payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified');
+
+-- Enforce exactly one successful return fare collection per delivery
+CREATE UNIQUE INDEX idx_payments_single_return_fare 
+ON payments (delivery_id) 
+WHERE payment_type = 'return_fare' 
+  AND payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified');
+
+-- Payment history and retry lookup
 CREATE INDEX idx_payments_delivery_created
 ON payments (delivery_id, created_at DESC);
 
@@ -395,29 +564,26 @@ ON payments (delivery_id, created_at DESC);
 CREATE INDEX idx_commission_ledger_rider 
 ON commission_ledger (rider_id, created_at DESC);
 
--- Active pricing lookup
-CREATE INDEX idx_pricing_rules_active 
-ON pricing_rules (vehicle_type, is_active) 
+-- Idempotency: Prevent duplicate commission accruals for the same delivery
+CREATE UNIQUE INDEX idx_unique_delivery_commission 
+ON commission_ledger (delivery_id) 
+WHERE entry_type = 'commission_accrual';
+
+-- Idempotency: Prevent duplicate credits for the same settlement request
+CREATE UNIQUE INDEX idx_unique_settlement_ledger_credit 
+ON commission_ledger (settlement_request_id) 
+WHERE entry_type = 'settlement_payment';
+
+-- Fast active pricing rule lookup by vehicle
+CREATE UNIQUE INDEX idx_pricing_rules_active 
+ON pricing_rules (vehicle_type) 
 WHERE is_active = true;
 ```
 
 ---
 
-## 6. Location Data Privacy & Retention Policy
+## 6. Migration & Deployment Strategy
 
-1. **Transient Location Data**: Courier real-time GPS tracking coordinates are maintained primarily in ephemeral memory/client state and updated in `rider_profiles.last_known_lat/lng`.
-2. **Permanent Trip Data**: Only the origin (`pickup_lat`, `pickup_lng`) and destination (`dropoff_lat`, `dropoff_lng`) coordinates and total billed distance are permanently retained for auditing and receipts.
-3. **Status Checkpoints**: Transition coordinates in `delivery_status_history` are retained for 90 days for dispute resolution, then anonymized.
-4. **Phone Privacy**: Recipient contact numbers are visible to couriers only during the delivery window (`assigned` through `arrived_dropoff`). After completion, phone numbers are masked in all rider-facing API views.
-
----
-
-## 7. Database Migration Strategy
-
-- **Tooling**: **Drizzle Kit** (`drizzle-kit generate` & `drizzle-kit migrate`).
-- **Principles**:
-  - All migrations are forward-only and version-controlled as SQL scripts under `drizzle/migrations/`.
-  - Schema changes must be backward-compatible (expand-and-contract pattern) to prevent downtime.
-  - Migrations should be tested against a separate Neon development branch when supported by the active plan/project; otherwise use a separate development Neon project/database. Production migrations require explicit review and approval.
-  - **For this current stage, do not generate or apply migrations and do not execute DDL.** This file is a design proposal only.
-  - Direct manual DDL execution on production is strictly prohibited.
+- **Forward-Only Migrations**: Managed via Drizzle ORM scripts under `drizzle/migrations/`.
+- **Branch-First Development**: All schema iterations are tested on an isolated Neon development branch or separate development database prior to production promotion.
+- **Stage 1 Constraint**: No migrations, DDL execution, or live database modifications are authorized during Stage 1 planning.
