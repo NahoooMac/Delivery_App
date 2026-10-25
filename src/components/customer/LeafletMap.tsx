@@ -37,6 +37,10 @@ interface SearchResultItem {
   distanceKm?: number;
 }
 
+const YANDEX_MAPS_KEY =
+  (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_YANDEX_MAPS_KEY || import.meta.env?.VITE_YANDEX_API_KEY)) ||
+  '';
+
 const MAPBOX_TOKEN =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_MAPBOX_TOKEN) ||
   (typeof window !== 'undefined' && (window as unknown as { __MAPBOX_TOKEN__?: string }).__MAPBOX_TOKEN__) ||
@@ -88,7 +92,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     pinModeRef.current = pinMode;
   }, [onSelectPickup, onSelectDropoff, pinMode]);
 
-  // 1. Initialize Full-Screen Map with Mapbox Navigation Day Tiles
+  // 1. Initialize Full-Screen Map with Yandex Maps API or Mapbox Navigation Tiles
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -107,17 +111,23 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     // Add clean zoom control top-right
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    // Mapbox Navigation Day Retina Tiles (Clean street geography matching Yango/Uber)
-    const tileUrl = MAPBOX_TOKEN
+    // Yandex Maps (Startup API) -> Mapbox Navigation Day -> Carto Voyager
+    const tileUrl = YANDEX_MAPS_KEY
+      ? `https://tiles.api-maps.yandex.ru/v1/tiles/?projection=wgs84_mercator&x={x}&y={y}&z={z}&apikey=${YANDEX_MAPS_KEY}`
+      : MAPBOX_TOKEN
       ? `https://api.mapbox.com/styles/v1/mapbox/navigation-day-v1/tiles/512/{z}/{x}/{y}@2x?access_token=${MAPBOX_TOKEN}`
       : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
 
+    const attribution = YANDEX_MAPS_KEY
+      ? '© <a href="https://yandex.com/maps-api/startup" target="_blank">Yandex Maps API</a> © OpenStreetMap'
+      : MAPBOX_TOKEN
+      ? '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+      : '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>';
+
     const tileLayer = L.tileLayer(tileUrl, {
-      attribution: MAPBOX_TOKEN
-        ? '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
-        : '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
-      tileSize: MAPBOX_TOKEN ? 512 : 256,
-      zoomOffset: MAPBOX_TOKEN ? -1 : 0,
+      attribution,
+      tileSize: MAPBOX_TOKEN && !YANDEX_MAPS_KEY ? 512 : 256,
+      zoomOffset: MAPBOX_TOKEN && !YANDEX_MAPS_KEY ? -1 : 0,
       maxZoom: 19,
     });
 

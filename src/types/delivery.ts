@@ -49,6 +49,13 @@ export type PaymentStatus =
   | 'failed'
   | 'disputed';
 
+export interface DeliveryAuditEntry {
+  timestamp: string;
+  action: string;
+  note: string;
+  actor: string;
+}
+
 export interface Delivery {
   id: string;
   trackingNumber: string;
@@ -81,6 +88,23 @@ export interface Delivery {
   riderName?: string;
   riderPhone?: string;
   riderPlate?: string;
+
+  // Milestone Timestamps
+  acceptedAt?: string;
+  arrivedPickupAt?: string;
+  pickedUpAt?: string;
+  arrivedDropoffAt?: string;
+  deliveredAt?: string;
+
+  // Payment Record
+  paymentCollectedAt?: string;
+  paymentCollectedMethod?: PaymentMethod;
+  paymentCollectedBy?: PayerType;
+  paymentAmountCollected?: number;
+  paymentNotes?: string;
+
+  // Audit trail (replaces OTP verification)
+  auditTrail?: DeliveryAuditEntry[];
 }
 
 export interface EstimateInput {

@@ -60,15 +60,31 @@ export function App() {
           ? {
               ...d,
               status: 'assigned',
+              acceptedAt: new Date().toISOString(),
               riderName: 'Yonas Getachew (Motorcycle)',
               riderPhone: '+251912987654',
               riderPlate: 'AA-2-B48192',
+              auditTrail: [
+                ...(d.auditTrail || []),
+                {
+                  timestamp: new Date().toISOString(),
+                  action: 'accepted',
+                  note: 'Delivery accepted by rider Yonas Getachew',
+                  actor: 'Rider: Yonas Getachew',
+                },
+              ],
             }
           : d
       )
     );
     setNotification(`Job claimed successfully! Order locked to courier Yonas Getachew.`);
     setTimeout(() => setNotification(null), 5000);
+  };
+
+  const handleUpdateDelivery = (updatedDelivery: Delivery) => {
+    setDeliveries((prev) =>
+      prev.map((d) => (d.id === updatedDelivery.id ? updatedDelivery : d))
+    );
   };
 
   return (
@@ -235,6 +251,7 @@ export function App() {
               <CourierJobBoardPreview
                 deliveries={deliveries}
                 onClaimDelivery={handleClaimDelivery}
+                onUpdateDelivery={handleUpdateDelivery}
               />
             </div>
           </div>

@@ -517,7 +517,7 @@ export const AdminAuditPreview: React.FC<AdminAuditPreviewProps> = ({
                 Live Delivery Orders Dispatch Log
               </h3>
               <p className="text-[11px] text-neutral-500">
-                Inspect real-time orders, OTP handshakes, and fare allocations across Addis Ababa.
+                Inspect real-time orders, rider confirmation audit trail (No OTP), and fare allocations across Addis Ababa.
               </p>
             </div>
           </div>
@@ -530,7 +530,7 @@ export const AdminAuditPreview: React.FC<AdminAuditPreviewProps> = ({
                   <th className="py-2.5 px-4 font-bold">Route</th>
                   <th className="py-2.5 px-4 font-bold">Contacts</th>
                   <th className="py-2.5 px-4 font-bold">Fare & Payer</th>
-                  <th className="py-2.5 px-4 font-bold">Status</th>
+                  <th className="py-2.5 px-4 font-bold">Status & Audit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
@@ -556,10 +556,10 @@ export const AdminAuditPreview: React.FC<AdminAuditPreviewProps> = ({
 
                     <td className="py-3 px-4">
                       <div className="text-neutral-900">
-                        From: <span className="font-medium">{item.pickupContactName}</span>
+                        From: <span className="font-medium">{item.pickupContactName}</span> ({item.pickupContactPhone})
                       </div>
                       <div className="text-neutral-500 text-[11px]">
-                        To: {item.dropoffContactName}
+                        To: {item.dropoffContactName} ({item.dropoffContactPhone})
                       </div>
                     </td>
 
@@ -568,14 +568,19 @@ export const AdminAuditPreview: React.FC<AdminAuditPreviewProps> = ({
                         ETB {item.fareTotal.toFixed(2)}
                       </div>
                       <div className="text-[10px] text-neutral-500 capitalize">
-                        {item.payerType} pays
+                        {item.payerType} pays • {item.paymentStatus}
                       </div>
                     </td>
 
                     <td className="py-3 px-4">
-                      <span className="rounded-full bg-neutral-100 text-neutral-800 border border-neutral-200 px-2 py-0.5 text-[10px] font-bold">
+                      <span className="rounded-full bg-neutral-100 text-neutral-800 border border-neutral-200 px-2 py-0.5 text-[10px] font-bold block w-fit">
                         {item.status.replace('_', ' ').toUpperCase()}
                       </span>
+                      {item.auditTrail && item.auditTrail.length > 0 && (
+                        <div className="text-[10px] text-neutral-500 mt-1 max-w-[220px]">
+                          Latest: {item.auditTrail[item.auditTrail.length - 1].note}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
