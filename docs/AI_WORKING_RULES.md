@@ -50,7 +50,7 @@ As an AI technical lead and pairing partner, these rules must be strictly adhere
     pickupPhone: z.string().regex(/^\+251[79]\d{8}$/, 'Must be a valid Ethiopian phone number (+251...)'),
     vehicleType: z.enum(['motorcycle', 'bicycle']),
     packageWeightKg: z.number().positive().max(30),
-    payerType: z.enum(['sender', 'receiver', 'business_account']),
+    payerType: z.enum(['sender', 'receiver']), // MVP scope strictly sender or receiver; business_account billing deferred
   });
 
   export type CreateDeliveryInput = z.infer<typeof createDeliverySchema>;

@@ -167,8 +167,8 @@ sequenceDiagram
   - Courier asks recipient for the 4-digit recipient OTP and submits it.
   - The backend executes an atomic transaction that acquires a row-level lock on `rider_profiles` to serialize the courier's financial ledger balance.
   - **Server-Side Payment Enforcement**: If `payer_type = 'receiver'`, the database transaction validates within the update query that a recorded payment (`collected_cash_rider_confirmed`, `collected_unverified`, or `verified`) exists in the `payments` table. If missing, the transition is rejected with `400 Bad Request: Payment collection must be recorded before completing delivery handover`.
-  - The state transition from `arrived_dropoff` $\rightarrow$ `delivered` and the insertion of the `commission_accrual` debit into `commission_ledger` are atomically linked (via CTE).
-  - The commission ledger insert occurs **if and only if** the delivery update succeeds and the recipient OTP is valid, unexpired, and unused.
+  - The state transition from `arrived_dropoff` $\rightarrow$ `delivered`, the insertion of the `commission_accrual` debit into `commission_ledger`, the synchronization of the cached debt on `rider_profiles`, and the insertion into `delivery_status_history` are executed atomically inside a serialized database transaction.
+  - The commission ledger insert occurs **if and only if** the delivery validations succeed and the recipient OTP is valid, unexpired, and unused.
   - Retries, network timeouts, or duplicate OTP submissions are safely handled without duplicate ledger debits (guaranteed by the unique index `idx_unique_delivery_commission`).
 
 #### Step 6: Failed Delivery & Return Protocol

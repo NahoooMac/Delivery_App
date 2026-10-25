@@ -481,112 +481,226 @@ INSERT INTO delivery_status_history (
 COMMIT;
 ```
 
-### 4.2 Idempotent Commission Accrual on Delivery Handover
+### 4.2 Handover Verification & Atomic Commission Accrual
 Ensures that the commission ledger debit occurs **only when the `arrived_dropoff` $\rightarrow$ `delivered` transition succeeds**, the recipient OTP is verified, and any required receiver fare collection has been recorded.
 
-To prevent concurrent financial operations from computing corrupt `balance_after` snapshots, the transaction **locks the courier's `rider_profiles` row** to serialize balance updates per courier. The state update and ledger debit are linked via an atomic CTE so that the ledger insert executes if and only if the delivery row update succeeds:
+#### 4.2.1 Transactional Workflow & Execution Protocol
+To avoid ambiguous driver return values from multi-statement CTEs and guarantee deterministic error reporting, the delivery completion procedure executes inside an isolated transaction (`BEGIN ... COMMIT`) following a deterministic two-phase inspection and execution pattern:
 
 ```sql
 BEGIN;
 
--- 1. Serialize ledger balance updates per courier by acquiring row-level lock
+-- Phase 1: Authoritative Inspection Under Exclusive Row Locks
+-- 1. Acquire exclusive lock on courier profile to serialize financial mutations
 SELECT user_id, current_debt 
 FROM rider_profiles 
 WHERE user_id = :rider_id 
 FOR UPDATE;
 
--- 2. Atomic CTE: Advance status to 'delivered' AND conditionally insert commission accrual
--- Enforces:
--- a) Delivery status must be 'arrived_dropoff' and assigned to this courier
--- b) Recipient OTP must be valid (matching HMAC hash), unexpired, unused, and not locked
--- c) SERVER-SIDE PAYMENT GUARD: If payer_type = 'receiver', a valid recorded payment must exist in 'payments'
-WITH delivery_update AS (
-    UPDATE deliveries
-    SET status = 'delivered',
-        delivered_at = NOW(),
-        verification_otp_used_at = NOW(),
-        updated_at = NOW()
-    WHERE id = :delivery_id 
-      AND status = 'arrived_dropoff'
-      AND rider_id = :rider_id
-      AND verification_locked = false
-      AND verification_otp_expires_at > NOW()
-      AND verification_otp_used_at IS NULL
-      AND verification_otp_hash = :calculated_hmac_hash
-      AND (
-          payer_type != 'receiver' 
-          OR EXISTS (
-              SELECT 1 FROM payments p 
-              WHERE p.delivery_id = deliveries.id 
-                AND p.payment_type = 'delivery_fare' 
-                AND p.payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified')
-          )
-      )
-    RETURNING id, rider_id, commission_amount, payer_type
-),
-ledger_insert AS (
-    INSERT INTO commission_ledger (
-        rider_id, 
-        delivery_id, 
-        entry_type, 
-        amount, 
-        balance_after, 
-        status,
-        notes
-    )
-    SELECT 
-        du.rider_id, 
-        du.id, 
-        'commission_accrual', 
-        du.commission_amount,
-        (SELECT COALESCE(balance_after, 0.00) 
-         FROM commission_ledger 
-         WHERE rider_id = du.rider_id 
-         ORDER BY created_at DESC, id DESC LIMIT 1) + du.commission_amount,
-        'accrued',
-        'Platform commission on delivery completion'
-    FROM delivery_update du
-    ON CONFLICT (delivery_id) WHERE entry_type = 'commission_accrual' DO NOTHING
-    RETURNING id, rider_id, balance_after
-),
-profile_update AS (
-    UPDATE rider_profiles rp
-    SET current_debt = li.balance_after,
-        updated_at = NOW()
-    FROM ledger_insert li
-    WHERE rp.user_id = li.rider_id
-    RETURNING rp.user_id
-)
-INSERT INTO delivery_status_history (
-    delivery_id, from_status, to_status, changed_by_user_id, notes
-)
-SELECT 
-    du.id, 'arrived_dropoff', 'delivered', du.rider_id, 'Recipient OTP verified; physical handover complete'
-FROM delivery_update du;
-
--- 3. Application Verification & Branching Logic:
--- IF 0 rows returned from delivery_update:
---   a) Query current delivery state:
---      - If status is already 'delivered': 
---          ROLLBACK; return 200 OK (idempotent duplicate request; delivery already verified).
---      - If status is 'arrived_dropoff' AND payer_type = 'receiver' AND NOT EXISTS (valid payment in payments):
---          ROLLBACK; return 400 Bad Request: 'Payment collection must be recorded before completing delivery handover'.
---          (NOTE: Verification attempt counter is NOT incremented for missing payment records).
---      - If status is 'arrived_dropoff' AND OTP is invalid / expired / locked:
---          Increment failed attempts counter:
---          UPDATE deliveries 
---          SET verification_attempts = verification_attempts + 1,
---              verification_locked = (verification_attempts + 1 >= 5),
---              updated_at = NOW()
---          WHERE id = :delivery_id;
---          COMMIT;
---          Return 400 Bad Request: 'Invalid or expired OTP'.
---      - Otherwise:
---          ROLLBACK; return 409 Conflict: 'Invalid delivery state'.
--- IF 1 row returned (successful transition):
-COMMIT;
--- Return 200 OK: Delivery completed and commission debited.
+-- 2. Acquire exclusive lock on target delivery row to inspect authoritative state
+SELECT id, status, rider_id, payer_type, commission_amount,
+       verification_otp_hash, verification_otp_expires_at, 
+       verification_otp_used_at, verification_attempts, verification_locked
+FROM deliveries 
+WHERE id = :delivery_id 
+FOR UPDATE;
 ```
+
+#### 4.2.2 Server-Side Guard Logic & Deterministic Branching
+The application backend inspects the locked row and deterministically branches:
+
+1. **Idempotency Check**:
+   - If `status = 'delivered'`:
+   - Action: `COMMIT;` (or `ROLLBACK;` as no state mutated).
+   - Return: HTTP `200 OK: Delivery already completed (idempotent duplicate request)`.
+
+2. **Delivery State & Assignment Guard**:
+   - If `status != 'arrived_dropoff'` OR `rider_id != :rider_id`:
+   - Action: `ROLLBACK;`.
+   - Return: HTTP `409 Conflict: Delivery cannot be delivered from status '${status}'`.
+
+3. **Lockout Guard**:
+   - If `verification_locked = true` OR `verification_attempts >= 5`:
+   - Action: `ROLLBACK;`.
+   - Return: HTTP `403 Forbidden: Verification locked due to excessive failed attempts`.
+
+4. **Server-Side Receiver Payment Prerequisite**:
+   - If `payer_type = 'receiver'`:
+     ```sql
+     SELECT id FROM payments 
+     WHERE delivery_id = :delivery_id 
+       AND payment_type = 'delivery_fare' 
+       AND payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified')
+     LIMIT 1;
+     ```
+   - If 0 rows returned:
+   - Action: `ROLLBACK;`.
+   - Return: HTTP `400 Bad Request: Payment collection must be recorded before completing delivery handover`.
+   - *(Note: `verification_attempts` is NOT incremented; this is a payment prerequisite failure, not an invalid OTP entry).*
+
+5. **Cryptographic OTP Validation**:
+   - Compute candidate HMAC: $\text{HMAC-SHA256}(\text{ServerPepper}, \text{delivery\_id} + \text{salt} + \text{candidate\_otp})$.
+   - If `candidate_hmac != verification_otp_hash` OR `verification_otp_expires_at <= NOW()` OR `verification_otp_used_at IS NOT NULL`:
+     ```sql
+     UPDATE deliveries 
+     SET verification_attempts = verification_attempts + 1,
+         verification_locked = (verification_attempts + 1 >= 5),
+         updated_at = NOW()
+     WHERE id = :delivery_id;
+     COMMIT; -- Persist failed attempt counter
+     ```
+   - Return: HTTP `400 Bad Request: Invalid or expired OTP. (Attempts remaining: ${5 - attempts})`.
+
+6. **Phase 2: Atomic State Transition & Financial Accrual (All Guards Passed)**:
+   ```sql
+   -- a. Advance delivery status to delivered
+   UPDATE deliveries
+   SET status = 'delivered',
+       delivered_at = NOW(),
+       verification_otp_used_at = NOW(),
+       updated_at = NOW()
+   WHERE id = :delivery_id;
+
+   -- b. Append commission accrual to commission_ledger
+   INSERT INTO commission_ledger (
+       rider_id, delivery_id, entry_type, amount, balance_after, status, notes
+   )
+   VALUES (
+       :rider_id, 
+       :delivery_id, 
+       'commission_accrual', 
+       :commission_amount,
+       (SELECT COALESCE(balance_after, 0.00) 
+        FROM commission_ledger 
+        WHERE rider_id = :rider_id AND status IN ('accrued', 'settled')
+        ORDER BY created_at DESC, id DESC LIMIT 1) + :commission_amount,
+       'accrued',
+       'Platform commission on delivery completion'
+   )
+   ON CONFLICT (delivery_id) WHERE entry_type = 'commission_accrual' DO NOTHING
+   RETURNING id, balance_after;
+
+   -- c. Atomically synchronize cached current_debt on rider_profiles
+   UPDATE rider_profiles
+   SET current_debt = (
+       SELECT balance_after 
+       FROM commission_ledger 
+       WHERE rider_id = :rider_id AND status IN ('accrued', 'settled')
+       ORDER BY created_at DESC, id DESC LIMIT 1
+   ),
+   updated_at = NOW()
+   WHERE user_id = :rider_id;
+
+   -- d. Record status transition audit
+   INSERT INTO delivery_status_history (
+       delivery_id, from_status, to_status, changed_by_user_id, notes
+   ) VALUES (
+       :delivery_id, 'arrived_dropoff', 'delivered', :rider_id, 'Recipient OTP verified; physical handover complete'
+   );
+
+   COMMIT;
+   ```
+   - Return: HTTP `200 OK: { success: true, deliveryId: :delivery_id, balanceAfter: :new_balance }`.
+
+---
+
+### 4.3 Financial Invariant: Commission Ledger as Source of Truth & Profile Debt Synchronization
+
+#### 4.3.1 Architectural Roles & Invariant Definition
+- **Immutable Ledger as Sole Source of Truth**: `commission_ledger` is the append-only single source of truth for all courier financial accounting, platform commissions, and settlements. Rows are never mutated or deleted.
+- **Materialized Profile Debt Cache**: `rider_profiles.current_debt` is an **explicitly denormalized, materialized balance cache** stored directly on the courier's profile row.
+- **Rationale**: Querying `rider_profiles.current_debt` enables $O(1)$ indexed evaluations during Job Board filtering (`current_debt < 500.00 ETB`) and atomic job claims, eliminating expensive running window aggregations or lateral joins across hundreds of thousands of historical ledger entries on every dispatch poll.
+- **The Accounting Invariant**:
+  Outside of an open serializing transaction, for every courier $R$:
+  $$\text{rider\_profiles.current\_debt} \equiv \text{latest balance\_after in } \texttt{commission\_ledger} \text{ where status } \in (\text{'accrued'}, \text{'settled'})$$
+
+#### 4.3.2 Ledger Entry Lifecycle & Balance Mutations
+| Entry Type | Trigger Event | Status | Modifies `balance_after`? | Effect on `rider_profiles.current_debt` |
+| :--- | :--- | :--- | :--- | :--- |
+| `commission_accrual` | Handover completion (`arrived_dropoff` $\rightarrow$ `delivered`) | `'accrued'` | **YES (immediate)** | Increases debt ($+\text{amount}$) |
+| `settlement_payment` (Courier submission) | Courier submits Telebirr/CBE ref in portal | `'pending_verification'` | **NO** (`balance_after = NULL`) | **Zero effect** (debt unchanged; job claiming remains blocked if $\ge 500$ ETB) |
+| `settlement_payment` (Admin approval) | Admin inspects bank statement and approves settlement | `'settled'` | **YES (upon approval)** | Reduces debt ($-\text{amount}$) |
+| `settlement_payment` (Admin rejection) | Admin rejects invalid/unmatched bank reference | `'voided'` | **NO** | Zero effect |
+| `adjustment` | Admin manual dispute resolution or correction | `'settled'` | **YES (upon approval)** | Adjusts debt ($+\text{amount}$ or $-\text{amount}$) |
+
+#### 4.3.3 SQL Specification: Administrator Settlement Approval
+
+```sql
+BEGIN;
+
+-- 1. Acquire exclusive lock on target courier profile to serialize balance mutations
+SELECT user_id, current_debt 
+FROM rider_profiles 
+WHERE user_id = :rider_id 
+FOR UPDATE;
+
+-- 2. Verify settlement request is valid, pending, and uncredited (backed by idx_unique_settlement_ledger_credit)
+
+-- 3. Insert approved settlement credit into commission_ledger
+INSERT INTO commission_ledger (
+    rider_id, 
+    settlement_request_id,
+    entry_type, 
+    amount, 
+    balance_after, 
+    status, 
+    reference_number,
+    settled_by_admin_id,
+    notes
+)
+VALUES (
+    :rider_id, 
+    :settlement_request_id,
+    'settlement_payment', 
+    -:approved_settlement_amount, -- Negative value credits/reduces debt
+    (SELECT COALESCE(balance_after, 0.00) 
+     FROM commission_ledger 
+     WHERE rider_id = :rider_id AND status IN ('accrued', 'settled')
+     ORDER BY created_at DESC, id DESC LIMIT 1) - :approved_settlement_amount,
+    'settled',
+    :bank_transaction_reference,
+    :admin_user_id,
+    :admin_approval_notes
+)
+ON CONFLICT (settlement_request_id) WHERE entry_type = 'settlement_payment' DO NOTHING
+RETURNING id, balance_after;
+
+-- 4. Atomically synchronize rider_profiles.current_debt cache
+UPDATE rider_profiles
+SET current_debt = (
+    SELECT balance_after 
+    FROM commission_ledger 
+    WHERE rider_id = :rider_id AND status IN ('accrued', 'settled')
+    ORDER BY created_at DESC, id DESC LIMIT 1
+),
+updated_at = NOW()
+WHERE user_id = :rider_id;
+
+COMMIT;
+```
+
+#### 4.3.4 Drift Detection & Automated Reconciliation
+To guarantee absolute data integrity, a background reconciliation job runs periodically to audit cache consistency:
+
+```sql
+-- Scheduled Drift Audit & Reconciliation Query
+SELECT 
+    rp.user_id,
+    rp.current_debt AS cached_debt,
+    COALESCE(cl.latest_balance, 0.00) AS ledger_debt,
+    (rp.current_debt - COALESCE(cl.latest_balance, 0.00)) AS discrepancy
+FROM rider_profiles rp
+LEFT JOIN LATERAL (
+    SELECT balance_after AS latest_balance
+    FROM commission_ledger
+    WHERE rider_id = rp.user_id AND status IN ('accrued', 'settled')
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+) cl ON true
+WHERE rp.current_debt != COALESCE(cl.latest_balance, 0.00);
+```
+
+If any discrepancy is detected, an alert is triggered, and `rp.current_debt` is automatically resynchronized to `cl.latest_balance`, ensuring that `commission_ledger` remains the uncompromised source of truth.
 
 ---
 

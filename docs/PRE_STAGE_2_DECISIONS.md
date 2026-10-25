@@ -7,6 +7,8 @@
 
 This document formally records the architectural, business, financial, and schema decisions resolving all findings identified in [`docs/PRE_STAGE_2_REVIEW.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/PRE_STAGE_2_REVIEW.md). 
 
+> **Document Status & Synchronization Note**: This document has been fully updated and synchronized to reflect the finalized specifications in [`docs/DATABASE_DESIGN.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/DATABASE_DESIGN.md) and [`docs/MVP_SPEC.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/MVP_SPEC.md). In all development activities, [`docs/DATABASE_DESIGN.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/DATABASE_DESIGN.md) and [`docs/MVP_SPEC.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/MVP_SPEC.md) are the authoritative primary sources of truth.
+
 These decisions govern the pending updates to [`docs/MVP_SPEC_UPDATED.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/MVP_SPEC_UPDATED.md) and [`docs/DATABASE_DESIGN_UPDATED.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/DATABASE_DESIGN_UPDATED.md) before initiating Stage 2 scaffolding and migrations.
 
 ---
@@ -48,11 +50,25 @@ These decisions govern the pending updates to [`docs/MVP_SPEC_UPDATED.md`](file:
 ## 3. Technical & Schema Resolutions
 
 ### 3.1 Duplicate Payment Prevention & Idempotency
-- **Partial Unique Index**: To allow audit history and retry records while preventing duplicate fee collection, PostgreSQL enforces a partial unique index on successful payments:
+- **Separated Partial Unique Indexes**: To allow audit history and retry records while preventing duplicate fee collection across distinct payment types, PostgreSQL enforces three separate partial unique indexes:
   ```sql
-  CREATE UNIQUE INDEX idx_payments_single_successful_collection 
+  -- 1. Enforce exactly one successful payment collection per ordinary delivery fee
+  CREATE UNIQUE INDEX idx_payments_single_successful_delivery_fare 
   ON payments (delivery_id) 
-  WHERE payment_status IN ('collected_unverified', 'collected_cash_rider_confirmed', 'verified');
+  WHERE payment_type = 'delivery_fare' 
+    AND payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified');
+
+  -- 2. Enforce exactly one successful cancellation fee collection per delivery
+  CREATE UNIQUE INDEX idx_payments_single_cancellation_fee 
+  ON payments (delivery_id) 
+  WHERE payment_type = 'cancellation_fee' 
+    AND payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified');
+
+  -- 3. Enforce exactly one successful return fare collection per delivery
+  CREATE UNIQUE INDEX idx_payments_single_return_fare 
+  ON payments (delivery_id) 
+  WHERE payment_type = 'return_fare' 
+    AND payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified');
   ```
 - **Idempotency Key**: Payment submission requests require a client-generated UUID `idempotency_key` stored in `payments.idempotency_key` to reject accidental network re-transmissions.
 - **State Machine Transitions**:
@@ -74,19 +90,27 @@ The `deliveries` schema is extended with explicit cancellation tracking columns:
 - `cancellation_fee NUMERIC(12, 2) DEFAULT 0.00`: Billed cancellation fee.
 
 ### 3.4 Concurrency Guard: Enforcing One Active Delivery per Rider
-- Even under high-concurrency race conditions, a courier can only hold **one active delivery** at any time.
-- The atomic claim transaction checks existing active jobs before locking the requested job:
+- Even under high-concurrency race conditions, a courier can only hold **one active delivery** at any time across all non-terminal active statuses: `assigned`, `arrived_pickup`, `picked_up`, `arrived_dropoff`, and `failed`.
+- Because locking delivery rows alone cannot lock anything if the courier currently holds 0 deliveries, concurrency control begins with a **courier-level row lock on `rider_profiles`**, backed by a database-level partial unique index:
   ```sql
   BEGIN;
 
-  -- 1. Check if rider already holds an active job
+  -- 1. Courier-Level Lock: Serialize all assignment operations for this specific courier
+  SELECT user_id, verification_status, current_debt 
+  FROM rider_profiles 
+  WHERE user_id = :claiming_rider_id 
+  FOR UPDATE;
+
+  -- 2. Verify courier vetting status and debt ceiling (< 500.00 ETB)
+
+  -- 3. Verify courier currently holds ZERO active deliveries (across canonical active statuses)
   SELECT id FROM deliveries 
   WHERE rider_id = :claiming_rider_id 
-    AND status IN ('assigned', 'arrived_pickup', 'picked_up', 'arrived_dropoff')
-  FOR UPDATE;
-  -- If rows exist: ROLLBACK and return 409 Conflict: 'Rider already has an active delivery'.
+    AND status IN ('assigned', 'arrived_pickup', 'picked_up', 'arrived_dropoff', 'failed')
+  LIMIT 1;
+  -- If any row exists: ROLLBACK and return 409 Conflict: 'Courier already has an active delivery'.
 
-  -- 2. Atomically claim the target delivery
+  -- 4. Lock and atomically claim the target delivery
   UPDATE deliveries
   SET status = 'assigned',
       rider_id = :claiming_rider_id,
@@ -98,7 +122,20 @@ The `deliveries` schema is extended with explicit cancellation tracking columns:
   RETURNING id;
   -- If 0 rows updated: ROLLBACK and return 409 Conflict: 'Job already claimed or unavailable'.
 
+  -- 5. Record audit history
+  INSERT INTO delivery_status_history (
+      delivery_id, from_status, to_status, changed_by_user_id, notes
+  ) VALUES (
+      :delivery_id, 'requested', 'assigned', :claiming_rider_id, 'Job claimed by courier'
+  );
+
   COMMIT;
+  ```
+- **Database Engine Fail-Safe**: Backed by partial unique index:
+  ```sql
+  CREATE UNIQUE INDEX idx_single_active_delivery_per_rider 
+  ON deliveries (rider_id) 
+  WHERE status IN ('assigned', 'arrived_pickup', 'picked_up', 'arrived_dropoff', 'failed');
   ```
 
 ### 3.5 Representation of Unregistered Recipients
@@ -113,11 +150,12 @@ The `deliveries` schema is extended with explicit cancellation tracking columns:
 - **No Plaintext or Unsalted Hashes**: Numeric 4-digit codes have only 10,000 combinations.
 - **Peppered HMAC**: The platform stores `verification_otp_hash` calculated as:
   $$\text{HMAC-SHA256}(\text{ServerSecretPepper}, \text{delivery\_id} + \text{salt} + \text{otp})$$
+- **Generation Timing & Nullability**: Prior to physical parcel collection at `picked_up`, all recipient verification OTP fields remain `NULL`. They are generated and hashed exclusively when status transitions to `picked_up`, with a 60-minute expiry window.
 - Schema columns in `deliveries`:
-  - `verification_otp_hash VARCHAR(255) NOT NULL`
-  - `verification_otp_salt VARCHAR(64) NOT NULL`
-  - `verification_otp_expires_at TIMESTAMPTZ NOT NULL`
-  - `verification_otp_used_at TIMESTAMPTZ NULL`
+  - `verification_otp_hash VARCHAR(255) NULL` (populated at picked_up)
+  - `verification_otp_salt VARCHAR(64) NULL` (populated at picked_up)
+  - `verification_otp_expires_at TIMESTAMPTZ NULL` (set to NOW() + 60m at picked_up)
+  - `verification_otp_used_at TIMESTAMPTZ NULL` (set at delivered)
   - `verification_attempts INT NOT NULL DEFAULT 0`
   - `verification_locked BOOLEAN NOT NULL DEFAULT false`
 
