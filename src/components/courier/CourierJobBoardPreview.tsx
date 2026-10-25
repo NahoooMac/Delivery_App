@@ -166,7 +166,7 @@ export const CourierJobBoardPreview: React.FC<CourierJobBoardPreviewProps> = ({
             <Clock className="mx-auto h-8 w-8 text-slate-600 mb-2" />
             <p className="text-sm font-semibold text-slate-300">No unassigned orders on the Job Board right now</p>
             <p className="text-xs text-slate-500 mt-1">
-              Switch to Customer Portal and click "Send a Delivery" to broadcast a mock order!
+              Switch to Customer App and book a demo delivery to test claiming!
             </p>
           </div>
         ) : (

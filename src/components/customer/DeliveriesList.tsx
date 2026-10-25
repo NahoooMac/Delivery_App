@@ -75,11 +75,25 @@ export const DeliveriesList: React.FC<DeliveriesListProps> = ({
           label: 'Delivered',
           bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
         };
+      case 'failed':
+        return {
+          label: 'Delivery Failed',
+          bg: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+        };
+      case 'returned':
+        return {
+          label: 'Returned to Sender',
+          bg: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
+        };
       case 'cancelled':
-      default:
         return {
           label: 'Cancelled',
-          bg: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+          bg: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
+        };
+      default:
+        return {
+          label: 'Unknown',
+          bg: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
         };
     }
   };
@@ -272,13 +286,23 @@ export const DeliveriesList: React.FC<DeliveriesListProps> = ({
               </div>
               <p className="text-[11px] text-slate-400">
                 {selectedDelivery.status === 'requested' &&
-                  'Order broadcasted to available couriers. Waiting for assignment.'}
+                  'Demo delivery created. Courier matching is not connected yet.'}
                 {selectedDelivery.status === 'assigned' &&
                   'Courier assigned! Courier is travelling to the pickup point.'}
+                {selectedDelivery.status === 'arrived_pickup' &&
+                  'Courier has arrived at the pickup location.'}
                 {selectedDelivery.status === 'picked_up' &&
                   'Package picked up! Recipient OTP has been generated for safe drop-off.'}
+                {selectedDelivery.status === 'arrived_dropoff' &&
+                  'Courier has arrived at the drop-off location awaiting recipient verification.'}
                 {selectedDelivery.status === 'delivered' &&
                   'Successfully delivered. Recipient verified via drop-off OTP.'}
+                {selectedDelivery.status === 'failed' &&
+                  'Delivery attempt failed. Recipient was unreachable or delivery could not be completed.'}
+                {selectedDelivery.status === 'returned' &&
+                  'Package was returned to the sender after an unsuccessful delivery attempt.'}
+                {selectedDelivery.status === 'cancelled' &&
+                  'Delivery order was cancelled.'}
               </p>
             </div>
 

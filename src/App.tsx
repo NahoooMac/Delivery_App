@@ -25,7 +25,7 @@ export function App() {
     setDeliveries((prev) => [newDelivery, ...prev]);
     setCustomerTab('deliveries');
     setNotification(
-      `Delivery ${newDelivery.trackingNumber} booked! Broadcasted to nearby Addis Ababa couriers.`
+      `Demo delivery created (${newDelivery.trackingNumber}). Courier matching is not connected yet.`
     );
     setTimeout(() => setNotification(null), 6000);
   };

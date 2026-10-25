@@ -115,10 +115,10 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
                 type="button"
                 onClick={handleUseCurrentLocation}
                 className="ml-2 flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1 text-[11px] font-medium text-slate-300 hover:text-emerald-300 hover:border-emerald-500/50 transition-colors shrink-0"
-                title="Use simulated Addis location"
+                title="Use sample Addis location (GPS not connected)"
               >
                 <Crosshair className="h-3 w-3 text-emerald-400" />
-                <span className="hidden sm:inline">Set Demo Location</span>
+                <span className="hidden sm:inline">Sample Location</span>
               </button>
             </div>
 
@@ -160,7 +160,7 @@ export const LocationSearchInput: React.FC<LocationSearchInputProps> = ({
         {/* GPS Demo Notice toast */}
         {gpsDemoNotice && (
           <div className="mt-2 flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-300">
-            <span>📍 Simulated current location set to Bole Medhanealem (No GPS API connected).</span>
+            <span>📍 Sample demo location selected (Bole Medhanealem). GPS is not connected.</span>
             <button type="button" onClick={() => setGpsDemoNotice(false)}>
               <X className="h-3 w-3 text-emerald-400" />
             </button>

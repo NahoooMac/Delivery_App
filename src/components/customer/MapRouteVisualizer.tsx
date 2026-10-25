@@ -148,18 +148,19 @@ export const MapRouteVisualizer: React.FC<MapRouteVisualizerProps> = ({
       </svg>
 
       {/* Floating Route Distance & ETA Pill */}
-      <div className="absolute top-4 left-4 z-10 flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/85 px-3 py-2 text-xs shadow-lg backdrop-blur-md">
+      <div className="absolute top-4 left-4 z-10 flex items-center gap-2.5 rounded-xl border border-slate-800 bg-slate-950/90 px-3 py-2 text-xs shadow-lg backdrop-blur-md">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400">
           <Navigation className="h-4 w-4" />
         </div>
         <div>
-          <div className="flex items-center gap-2 font-mono font-bold text-white">
+          <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-white">
             <span>~{distanceKm.toFixed(1)} km</span>
             <span className="text-slate-500">•</span>
             <span className="text-amber-400">~{estMinutes} mins</span>
+            <span className="text-[10px] font-sans font-normal text-slate-400">(Approx. Demo)</span>
           </div>
           <p className="text-[10px] text-slate-400">
-            {pickupSubcity} $\rightarrow$ {dropoffSubcity}
+            {pickupSubcity} → {dropoffSubcity}
           </p>
         </div>
       </div>
@@ -182,10 +183,10 @@ export const MapRouteVisualizer: React.FC<MapRouteVisualizerProps> = ({
           </div>
         </div>
 
-        {/* Clear Notice: No paid API / Vector simulation */}
-        <div className="flex items-center gap-1.5 rounded-lg border border-slate-800/80 bg-slate-950/70 px-2 py-1 text-[10px] text-slate-400 backdrop-blur-sm">
-          <Compass className="h-3 w-3 text-slate-500" />
-          <span>Vector Route Preview (Addis Centroids)</span>
+        {/* Clear Notice: Illustrative line between centroids, no street routing or GPS */}
+        <div className="flex items-center gap-1.5 rounded-lg border border-slate-800/80 bg-slate-950/80 px-2.5 py-1 text-[10px] text-slate-400 backdrop-blur-sm">
+          <Compass className="h-3 w-3 text-amber-400/80 shrink-0" />
+          <span>Illustrative centroid route • Does not follow road turns • No live GPS</span>
         </div>
       </div>
     </div>

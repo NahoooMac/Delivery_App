@@ -12,6 +12,12 @@ import { calculateFareQuote } from '../../data/addisLocations';
 import { MapRouteVisualizer } from './MapRouteVisualizer';
 import { LocationSearchInput } from './LocationSearchInput';
 
+// Validation for Ethiopian mobile numbers (+2519..., +2517..., 09..., 07..., 9..., 7...)
+export function isValidEthiopianPhone(phone: string): boolean {
+  const cleaned = phone.replace(/[\s\-()]/g, '');
+  return /^(\+251[79]\d{8}|0[79]\d{8}|[79]\d{8})$/.test(cleaned);
+}
+
 interface MapBookingFlowProps {
   onOrderCreated: (delivery: Delivery) => void;
   onGoToDeliveries: () => void;
@@ -33,11 +39,11 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
   // Vehicle Type
   const [vehicleType, setVehicleType] = useState<VehicleType>('motorcycle');
 
-  // Contact details
-  const [senderName, setSenderName] = useState('Abebe Kebede');
-  const [senderPhone, setSenderPhone] = useState('+251911234567');
-  const [receiverName, setReceiverName] = useState('Tsedey Alemu');
-  const [receiverPhone, setReceiverPhone] = useState('+251922345678');
+  // Contact details - started empty with helpful placeholders
+  const [senderName, setSenderName] = useState('');
+  const [senderPhone, setSenderPhone] = useState('');
+  const [receiverName, setReceiverName] = useState('');
+  const [receiverPhone, setReceiverPhone] = useState('');
 
   // Package details
   const [packageCategory, setPackageCategory] = useState<PackageCategory>('documents');
@@ -79,12 +85,28 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
   };
 
   const handleStep2Next = () => {
-    if (!senderPhone.trim() || !senderName.trim()) {
-      setValidationError('Sender name and Ethiopian phone number are required.');
+    if (!senderName.trim()) {
+      setValidationError('Please enter the sender contact name.');
       return;
     }
-    if (!receiverPhone.trim() || !receiverName.trim()) {
-      setValidationError('Recipient name and Ethiopian phone number are required.');
+    if (!senderPhone.trim()) {
+      setValidationError('Please enter the sender phone number.');
+      return;
+    }
+    if (!isValidEthiopianPhone(senderPhone)) {
+      setValidationError('Please enter a valid Ethiopian phone number for sender (e.g. 0911234567 or +251911234567).');
+      return;
+    }
+    if (!receiverName.trim()) {
+      setValidationError('Please enter the recipient contact name.');
+      return;
+    }
+    if (!receiverPhone.trim()) {
+      setValidationError('Please enter the recipient phone number.');
+      return;
+    }
+    if (!isValidEthiopianPhone(receiverPhone)) {
+      setValidationError('Please enter a valid Ethiopian phone number for recipient (e.g. 0922345678 or +251922345678).');
       return;
     }
     setValidationError(null);
@@ -214,9 +236,11 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {/* Motorcycle Card */}
-                    <div
+                    <button
+                      type="button"
+                      aria-pressed={vehicleType === 'motorcycle'}
                       onClick={() => setVehicleType('motorcycle')}
-                      className={`relative rounded-2xl border p-3.5 cursor-pointer transition-all ${
+                      className={`relative rounded-2xl border p-3.5 text-left w-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                         vehicleType === 'motorcycle'
                           ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
                           : 'border-slate-800 bg-slate-950/60 hover:border-slate-700'
@@ -252,16 +276,20 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                           {motorcycleQuote.totalFare.toFixed(2)} ETB
                         </span>
                       </div>
-                    </div>
+                    </button>
 
                     {/* Bicycle Card */}
-                    <div
+                    <button
+                      type="button"
+                      aria-pressed={vehicleType === 'bicycle'}
+                      aria-disabled={Boolean(bicycleQuote.exceedsLimit)}
+                      disabled={Boolean(bicycleQuote.exceedsLimit)}
                       onClick={() => {
                         if (!bicycleQuote.exceedsLimit) {
                           setVehicleType('bicycle');
                         }
                       }}
-                      className={`relative rounded-2xl border p-3.5 transition-all ${
+                      className={`relative rounded-2xl border p-3.5 text-left w-full transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                         bicycleQuote.exceedsLimit
                           ? 'border-slate-800/60 bg-slate-950/30 opacity-60 cursor-not-allowed'
                           : vehicleType === 'bicycle'
@@ -309,7 +337,7 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                             : `${bicycleQuote.totalFare.toFixed(2)} ETB`}
                         </span>
                       </div>
-                    </div>
+                    </button>
                   </div>
                 </div>
 
@@ -349,7 +377,7 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                           type="text"
                           value={senderName}
                           onChange={(e) => setSenderName(e.target.value)}
-                          placeholder="Sender Name"
+                          placeholder="e.g. Abebe Kebede"
                           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
                         />
                       </div>
@@ -358,7 +386,7 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                           type="text"
                           value={senderPhone}
                           onChange={(e) => setSenderPhone(e.target.value)}
-                          placeholder="+251911..."
+                          placeholder="e.g. 0911234567 or +251911..."
                           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white font-mono placeholder-slate-500 focus:border-amber-500 focus:outline-none"
                         />
                       </div>
@@ -376,7 +404,7 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                           type="text"
                           value={receiverName}
                           onChange={(e) => setReceiverName(e.target.value)}
-                          placeholder="Recipient Name"
+                          placeholder="e.g. Tsedey Alemu"
                           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
                         />
                       </div>
@@ -385,7 +413,7 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                           type="text"
                           value={receiverPhone}
                           onChange={(e) => setReceiverPhone(e.target.value)}
-                          placeholder="+251922..."
+                          placeholder="e.g. 0922345678 or +251922..."
                           className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white font-mono placeholder-slate-500 focus:border-amber-500 focus:outline-none"
                         />
                       </div>
@@ -534,17 +562,11 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                         {selectedQuote.distanceFare.toFixed(2)} ETB
                       </span>
                     </div>
-                    <div className="flex justify-between text-slate-400">
-                      <span>Platform Commission ({selectedQuote.commissionRatePct}%)</span>
-                      <span className="font-mono text-slate-400">
-                        {selectedQuote.commissionAmount.toFixed(2)} ETB
-                      </span>
-                    </div>
                   </div>
 
                   <div className="border-t border-slate-800 pt-2 flex items-baseline justify-between">
                     <div>
-                      <span className="text-xs font-bold text-amber-300 block">Total Due</span>
+                      <span className="text-xs font-bold text-amber-300 block">Total Delivery Fare</span>
                       <span className="text-[10px] text-slate-400">
                         Paid by: <strong className="text-slate-200 capitalize">{payerType}</strong>
                       </span>
@@ -553,6 +575,10 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                       {selectedQuote.totalFare.toFixed(2)} ETB
                     </span>
                   </div>
+
+                  <p className="text-[10px] text-slate-500">
+                    Final fare payable to courier upon {payerType === 'sender' ? 'pickup' : 'delivery'}. Includes all platform processing; no extra fees.
+                  </p>
                 </div>
 
                 {/* Order Confirmation Primary Action */}
