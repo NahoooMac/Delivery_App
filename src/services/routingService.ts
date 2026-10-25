@@ -1,14 +1,19 @@
 import { GeoPoint, calculateHaversineDistance } from '../data/addisLocations';
 
+export const MAPBOX_TOKEN =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_MAPBOX_TOKEN) ||
+  (typeof window !== 'undefined' && (window as unknown as { __MAPBOX_TOKEN__?: string }).__MAPBOX_TOKEN__) ||
+  '';
+
 export interface RouteResult {
   distanceKm: number;
   durationMinutes: number;
   coordinates: [number, number][]; // [lat, lng]
   isRealRoad: boolean;
-  source: 'osrm_road' | 'fallback_estimate';
+  source: 'mapbox_road' | 'osrm_road' | 'fallback_estimate';
 }
 
-// In-memory cache to avoid hitting public OSRM unnecessarily
+// In-memory cache to avoid hitting APIs unnecessarily
 const routeCache = new Map<string, RouteResult>();
 
 export async function fetchRoadRoute(
@@ -21,9 +26,9 @@ export async function fetchRoadRoute(
     return routeCache.get(cacheKey)!;
   }
 
-  // Abort controller with 3.5s timeout for fast UI responsiveness
+  // Abort controller with 4.0s timeout for fast UI responsiveness
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3500);
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
 
   const onExternalAbort = () => controller.abort();
   if (externalSignal) {
@@ -34,9 +39,46 @@ export async function fetchRoadRoute(
     }
   }
 
+  // 1. Try Mapbox Directions API first if token is available
+  if (MAPBOX_TOKEN) {
+    try {
+      const mapboxUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`;
+      const res = await fetch(mapboxUrl, { signal: controller.signal });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        const distanceKm = Math.round((route.distance / 1000) * 10) / 10;
+        const durationMinutes = Math.max(5, Math.round(route.duration / 60));
+        
+        // GeoJSON coordinates are [lng, lat], convert to Leaflet [lat, lng]
+        const coordinates: [number, number][] = route.geometry.coordinates.map(
+          ([lng, lat]: [number, number]) => [lat, lng]
+        );
+
+        const result: RouteResult = {
+          distanceKm,
+          durationMinutes,
+          coordinates,
+          isRealRoad: true,
+          source: 'mapbox_road',
+        };
+
+        routeCache.set(cacheKey, result);
+        return result;
+      }
+    }
+    } catch (err: unknown) {
+      if (externalSignal?.aborted) {
+        throw err;
+      }
+    }
+  }
+
+  // 2. Fallback to OSRM if Mapbox times out or is unreachable
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
-    const res = await fetch(url, { signal: controller.signal });
+    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(osrmUrl, { signal: controller.signal });
 
     if (res.ok) {
       const data = await res.json();
@@ -45,7 +87,6 @@ export async function fetchRoadRoute(
         const distanceKm = Math.round((route.distance / 1000) * 10) / 10;
         const durationMinutes = Math.max(8, Math.round(route.duration / 60));
         
-        // GeoJSON coordinates are [lng, lat], convert to Leaflet [lat, lng]
         const coordinates: [number, number][] = route.geometry.coordinates.map(
           ([lng, lat]: [number, number]) => [lat, lng]
         );
@@ -58,7 +99,6 @@ export async function fetchRoadRoute(
           source: 'osrm_road',
         };
 
-        // Cache real road results only
         routeCache.set(cacheKey, result);
         return result;
       }
@@ -67,7 +107,6 @@ export async function fetchRoadRoute(
     if (externalSignal?.aborted) {
       throw err;
     }
-    // Graceful fallback if OSRM is offline, slow, or blocked
   } finally {
     clearTimeout(timeoutId);
     if (externalSignal) {

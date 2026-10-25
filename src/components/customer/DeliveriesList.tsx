@@ -48,93 +48,90 @@ export const DeliveriesList: React.FC<DeliveriesListProps> = ({
       case 'requested':
         return {
           label: 'Finding Courier',
-          bg: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+          bg: 'bg-amber-100 text-amber-900 border-amber-200',
         };
       case 'assigned':
         return {
           label: 'Courier Assigned',
-          bg: 'bg-sky-500/10 text-sky-400 border-sky-500/30',
+          bg: 'bg-blue-100 text-blue-900 border-blue-200',
         };
       case 'arrived_pickup':
         return {
           label: 'At Pickup Location',
-          bg: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30',
+          bg: 'bg-indigo-100 text-indigo-900 border-indigo-200',
         };
       case 'picked_up':
         return {
-          label: 'In Transit (En Route)',
-          bg: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+          label: 'In Transit',
+          bg: 'bg-purple-100 text-purple-900 border-purple-200',
         };
       case 'arrived_dropoff':
         return {
           label: 'At Drop-off Location',
-          bg: 'bg-teal-500/10 text-teal-400 border-teal-500/30',
+          bg: 'bg-teal-100 text-teal-900 border-teal-200',
         };
       case 'delivered':
         return {
           label: 'Delivered',
-          bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+          bg: 'bg-emerald-100 text-emerald-900 border-emerald-200',
         };
       case 'failed':
         return {
           label: 'Delivery Failed',
-          bg: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+          bg: 'bg-rose-100 text-rose-900 border-rose-200',
         };
       case 'returned':
         return {
           label: 'Returned to Sender',
-          bg: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
+          bg: 'bg-orange-100 text-orange-900 border-orange-200',
         };
       case 'cancelled':
         return {
           label: 'Cancelled',
-          bg: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
+          bg: 'bg-neutral-100 text-neutral-600 border-neutral-200',
         };
       default:
         return {
           label: 'Unknown',
-          bg: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
+          bg: 'bg-neutral-100 text-neutral-600 border-neutral-200',
         };
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full h-full flex flex-col bg-neutral-50 overflow-y-auto p-4 space-y-4">
       {/* Header & Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+      <div className="flex items-center justify-between pb-2 border-b border-neutral-200">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <span>My Deliveries</span>
-            <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-mono text-slate-300">
-              {deliveries.length}
-            </span>
+          <h2 className="text-xl font-extrabold text-neutral-900 tracking-tight">
+            Activity
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Track active orders, verify recipient OTPs, and review delivery receipts.
+          <p className="text-xs text-neutral-500">
+            Track past and active package deliveries
           </p>
         </div>
 
         <button
           type="button"
           onClick={onBookNew}
-          className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-2 text-xs font-bold text-slate-950 shadow-md shadow-amber-500/20 hover:brightness-110 active:scale-95 transition-all self-start sm:self-auto"
+          className="flex items-center gap-1.5 rounded-full bg-black px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-neutral-800 transition-all active:scale-95"
         >
-          <Plus className="h-4 w-4" />
-          <span>Send New Package</span>
+          <Plus className="h-3.5 w-3.5" />
+          <span>New Delivery</span>
         </button>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
         {/* Status Pills */}
-        <div className="flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900/80 p-1 text-xs">
+        <div className="flex items-center gap-1 bg-white p-1 rounded-full border border-neutral-200 shadow-sm text-xs">
           <button
             type="button"
             onClick={() => setStatusFilter('all')}
-            className={`rounded-lg px-3 py-1.5 font-semibold transition-all ${
+            className={`rounded-full px-3 py-1 font-bold transition-all ${
               statusFilter === 'all'
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-black text-white'
+                : 'text-neutral-600 hover:text-black'
             }`}
           >
             All ({deliveries.length})
@@ -142,10 +139,10 @@ export const DeliveriesList: React.FC<DeliveriesListProps> = ({
           <button
             type="button"
             onClick={() => setStatusFilter('active')}
-            className={`rounded-lg px-3 py-1.5 font-semibold transition-all ${
+            className={`rounded-full px-3 py-1 font-bold transition-all ${
               statusFilter === 'active'
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-black text-white'
+                : 'text-neutral-600 hover:text-black'
             }`}
           >
             Active ({deliveries.filter((d) => isActiveStatus(d.status)).length})
@@ -153,94 +150,94 @@ export const DeliveriesList: React.FC<DeliveriesListProps> = ({
           <button
             type="button"
             onClick={() => setStatusFilter('delivered')}
-            className={`rounded-lg px-3 py-1.5 font-semibold transition-all ${
+            className={`rounded-full px-3 py-1 font-bold transition-all ${
               statusFilter === 'delivered'
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-black text-white'
+                : 'text-neutral-600 hover:text-black'
             }`}
           >
-            Delivered ({deliveries.filter((d) => d.status === 'delivered').length})
+            Completed ({deliveries.filter((d) => d.status === 'delivered').length})
           </button>
         </div>
 
         {/* Search Input */}
-        <div className="relative sm:w-72">
-          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+        <div className="relative sm:w-60">
+          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-neutral-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search tracking, landmark, item..."
-            className="w-full rounded-xl border border-slate-800 bg-slate-900/80 pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+            placeholder="Search tracking or place..."
+            className="w-full rounded-full border border-neutral-200 bg-white pl-8 pr-3 py-1.5 text-xs text-neutral-900 placeholder-neutral-400 focus:border-black focus:outline-none shadow-sm"
           />
         </div>
       </div>
 
-      {/* Deliveries List Cards */}
+      {/* Deliveries List */}
       {filteredDeliveries.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-slate-800 p-12 text-center space-y-3">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-slate-500">
-            <Package className="h-6 w-6" />
+        <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center space-y-2">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100 text-neutral-400">
+            <Package className="h-5 w-5" />
           </div>
-          <h3 className="text-sm font-bold text-white">No deliveries found</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+          <h3 className="text-sm font-bold text-neutral-900">No activity found</h3>
+          <p className="text-xs text-neutral-500 max-w-xs mx-auto">
             {searchQuery
               ? 'No packages match your search filter.'
-              : 'You have no delivery history in this tab yet.'}
+              : 'You have no deliveries in this tab yet.'}
           </p>
           <button
             type="button"
             onClick={onBookNew}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-400 hover:text-amber-300 underline"
+            className="inline-flex items-center gap-1 text-xs font-bold text-black underline pt-1"
           >
             <span>Book a delivery now</span>
-            <ArrowRight className="h-3.5 w-3.5" />
+            <ArrowRight className="h-3 w-3" />
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="space-y-2.5">
           {filteredDeliveries.map((item) => {
             const badge = getStatusBadge(item.status);
             return (
               <div
                 key={item.id}
                 onClick={() => setSelectedDelivery(item)}
-                className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 space-y-3 hover:border-slate-700 cursor-pointer transition-all shadow-sm group"
+                className="rounded-2xl border border-neutral-200 bg-white p-3.5 space-y-2 hover:border-neutral-400 cursor-pointer transition-all shadow-sm active:scale-[0.99]"
               >
                 {/* Header: Tracking & Status */}
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-bold text-slate-200">
+                  <span className="font-mono text-xs font-extrabold text-neutral-900">
                     {item.trackingNumber}
                   </span>
                   <span
-                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badge.bg}`}
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${badge.bg}`}
                   >
                     {badge.label}
                   </span>
                 </div>
 
                 {/* Route */}
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0"></span>
-                    <span className="truncate">{item.pickupLandmark}</span>
+                <div className="space-y-1 text-xs">
+                  <div className="flex items-center gap-2 text-neutral-800">
+                    <span className="h-2 w-2 rounded-[1.5px] bg-black shrink-0"></span>
+                    <span className="truncate font-semibold">{item.pickupLandmark}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <span className="h-2 w-2 rounded-sm bg-amber-400 shrink-0"></span>
-                    <span className="truncate">{item.dropoffLandmark}</span>
+                  <div className="flex items-center gap-2 text-neutral-800">
+                    <span className="h-2 w-2 rounded-full border border-black bg-white shrink-0"></span>
+                    <span className="truncate font-semibold">{item.dropoffLandmark}</span>
                   </div>
                 </div>
 
                 {/* Details Footer */}
-                <div className="flex items-center justify-between border-t border-slate-800/80 pt-2 text-[11px] text-slate-400">
+                <div className="flex items-center justify-between border-t border-neutral-100 pt-2 text-[11px] text-neutral-500">
                   <div className="flex items-center gap-1.5">
-                    <Bike className="h-3.5 w-3.5 text-amber-400" />
-                    <span className="capitalize">{item.vehicleType}</span>
+                    <Bike className="h-3.5 w-3.5 text-neutral-800" />
+                    <span className="capitalize font-medium">{item.vehicleType}</span>
                     <span>•</span>
                     <span>{item.packageWeightKg} kg</span>
                   </div>
-                  <span className="font-mono font-bold text-amber-300">
-                    {item.fareTotal.toFixed(2)} ETB
+                  <span className="font-extrabold text-xs text-neutral-900">
+                    ETB {item.fareTotal.toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -251,129 +248,91 @@ export const DeliveriesList: React.FC<DeliveriesListProps> = ({
 
       {/* Delivery Detail Modal */}
       {selectedDelivery && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-lg rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center justify-between border-b border-neutral-100 pb-2.5">
               <div>
-                <span className="text-[10px] uppercase font-bold text-amber-400 block tracking-wider">
+                <span className="text-[10px] uppercase font-bold text-neutral-400 block tracking-wider">
                   Delivery Details
                 </span>
-                <h3 className="font-mono text-base font-bold text-white">
+                <h3 className="font-mono text-sm font-extrabold text-neutral-900">
                   {selectedDelivery.trackingNumber}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedDelivery(null)}
-                className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-slate-800"
+                className="rounded-full p-1 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {/* Status Progress */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 space-y-2">
+            <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3 space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300">Current Status</span>
+                <span className="text-xs font-bold text-neutral-900">Current Status</span>
                 <span
-                  className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
                     getStatusBadge(selectedDelivery.status).bg
                   }`}
                 >
                   {getStatusBadge(selectedDelivery.status).label}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-neutral-600">
                 {selectedDelivery.status === 'requested' &&
                   'Demo delivery created. Courier matching is not connected yet.'}
                 {selectedDelivery.status === 'assigned' &&
-                  'Courier assigned! Courier is travelling to the pickup point.'}
-                {selectedDelivery.status === 'arrived_pickup' &&
-                  'Courier has arrived at the pickup location.'}
+                  'Courier assigned! Courier is travelling to pickup.'}
                 {selectedDelivery.status === 'picked_up' &&
-                  'Package picked up! Recipient OTP has been generated for safe drop-off.'}
-                {selectedDelivery.status === 'arrived_dropoff' &&
-                  'Courier has arrived at the drop-off location awaiting recipient verification.'}
+                  'Package picked up! Recipient OTP required for drop-off.'}
                 {selectedDelivery.status === 'delivered' &&
                   'Successfully delivered. Recipient verified via drop-off OTP.'}
                 {selectedDelivery.status === 'failed' &&
-                  'Delivery attempt failed. Recipient was unreachable or delivery could not be completed.'}
-                {selectedDelivery.status === 'returned' &&
-                  'Package was returned to the sender after an unsuccessful delivery attempt.'}
-                {selectedDelivery.status === 'cancelled' &&
-                  'Delivery order was cancelled.'}
+                  'Delivery attempt failed. Recipient was unreachable.'}
               </p>
             </div>
 
             {/* Route Details */}
-            <div className="space-y-3 text-xs">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-1">
-                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+            <div className="space-y-2 text-xs">
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50/60 p-2.5 space-y-0.5">
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block">
                   Pickup Location & Contact
                 </span>
-                <div className="text-white font-medium">{selectedDelivery.pickupLandmark}</div>
-                <div className="text-slate-400 text-[11px]">{selectedDelivery.pickupSubcity} Sub-City</div>
-                <div className="text-slate-400 text-[11px] pt-1">
-                  Contact: <strong className="text-slate-300">{selectedDelivery.pickupContactName}</strong> ({selectedDelivery.pickupContactPhone})
+                <div className="text-neutral-900 font-semibold">{selectedDelivery.pickupLandmark}</div>
+                <div className="text-neutral-500 text-[11px]">
+                  Contact: {selectedDelivery.pickupContactName} ({selectedDelivery.pickupContactPhone})
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-1">
-                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
-                  Drop-off Destination & Contact
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50/60 p-2.5 space-y-0.5">
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block">
+                  Drop-off Destination & Recipient
                 </span>
-                <div className="text-white font-medium">{selectedDelivery.dropoffLandmark}</div>
-                <div className="text-slate-400 text-[11px]">{selectedDelivery.dropoffSubcity} Sub-City</div>
-                <div className="text-slate-400 text-[11px] pt-1">
-                  Recipient: <strong className="text-slate-300">{selectedDelivery.dropoffContactName}</strong> ({selectedDelivery.dropoffContactPhone})
+                <div className="text-neutral-900 font-semibold">{selectedDelivery.dropoffLandmark}</div>
+                <div className="text-neutral-500 text-[11px]">
+                  Recipient: {selectedDelivery.dropoffContactName} ({selectedDelivery.dropoffContactPhone})
                 </div>
               </div>
             </div>
 
-            {/* Courier Assignment (if any) */}
-            {selectedDelivery.riderName && (
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs space-y-1">
-                <span className="text-[10px] font-bold text-sky-400 uppercase tracking-wider block">
-                  Assigned Courier
-                </span>
-                <div className="flex items-center justify-between">
-                  <span className="text-white font-semibold">{selectedDelivery.riderName}</span>
-                  <span className="font-mono text-slate-400">{selectedDelivery.riderPhone}</span>
-                </div>
-                {selectedDelivery.riderPlate && (
-                  <span className="text-[11px] text-slate-400 block">
-                    Plate: <strong className="text-slate-300">{selectedDelivery.riderPlate}</strong>
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Fare Summary */}
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 flex items-center justify-between text-xs">
-              <div>
-                <span className="text-slate-400 block text-[11px]">Total Fare</span>
-                <span className="text-amber-400 font-mono font-bold text-base">
-                  {selectedDelivery.fareTotal.toFixed(2)} ETB
-                </span>
-              </div>
-              <div className="text-right">
-                <span className="text-slate-400 block text-[11px]">Payment Mode</span>
-                <span className="text-slate-200 capitalize font-medium">
-                  {selectedDelivery.payerType === 'sender' ? 'Sender Pays' : 'Receiver Pays'}
-                </span>
-              </div>
+            {/* Fare */}
+            <div className="flex items-center justify-between border-t border-neutral-100 pt-3">
+              <span className="text-xs font-bold text-neutral-600">Total Fare:</span>
+              <span className="text-sm font-black text-neutral-900">
+                ETB {selectedDelivery.fareTotal.toFixed(2)}
+              </span>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setSelectedDelivery(null)}
-                className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-700 transition-colors"
-              >
-                Close
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedDelivery(null)}
+              className="w-full bg-black text-white py-3 rounded-xl text-xs font-bold hover:bg-neutral-800"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}

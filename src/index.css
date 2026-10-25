@@ -3,52 +3,183 @@
 
 @layer base {
   body {
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    color-scheme: dark;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #000000;
+    color: #000000;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* Leaflet dark theme customizations */
+/* Uber-style Leaflet map container */
 .leaflet-container {
   width: 100%;
   height: 100%;
-  background: #0b0f19 !important;
+  background: #f3f4f6 !important;
   font-family: inherit;
+  z-index: 10;
+}
+
+/* Uber Clean Zoom Controls */
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
 }
 
 .leaflet-control-zoom a {
-  background-color: #1e293b !important;
-  color: #f8fafc !important;
-  border-color: #334155 !important;
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border-color: #f3f4f6 !important;
+  width: 34px !important;
+  height: 34px !important;
+  line-height: 34px !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
 }
 
 .leaflet-control-zoom a:hover {
-  background-color: #334155 !important;
+  background-color: #f9fafb !important;
+  color: #000000 !important;
 }
 
 .leaflet-control-attribution {
-  background-color: rgba(15, 23, 42, 0.85) !important;
-  color: #94a3b8 !important;
-  font-size: 10px !important;
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  color: #6b7280 !important;
+  font-size: 9px !important;
   backdrop-filter: blur(4px);
+  padding: 2px 6px !important;
+  border-radius: 6px 0 0 0 !important;
 }
 
 .leaflet-control-attribution a {
-  color: #f59e0b !important;
+  color: #374151 !important;
+  text-decoration: none;
 }
 
-/* Custom subtle scrollbar */
+/* Uber Address Pins on Map */
+.uber-map-pin {
+  background: transparent;
+  border: none;
+}
+
+.uber-pin-wrapper {
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.18));
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.uber-pin-wrapper:hover {
+  transform: scale(1.05);
+}
+
+/* Subtle clean scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #090d16;
+  background: #f3f4f6;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 4px;
+  background: #d1d5db;
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #9ca3af;
 }
+
+/* Uber Draggable Map Markers */
+.uber-marker-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+}
+
+.uber-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #ffffff;
+  color: #000000;
+  padding: 5px 9px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: grab;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.uber-pill:active {
+  cursor: grabbing;
+  transform: scale(0.97);
+}
+
+.uber-pill-square {
+  width: 8px;
+  height: 8px;
+  background-color: #000000;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.uber-pill-eta {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #000000;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  margin-right: 2px;
+  line-height: 1;
+}
+
+.uber-pill-text {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #111827;
+}
+
+.uber-pill-chevron {
+  color: #9ca3af;
+  font-size: 14px;
+  margin-left: 1px;
+  font-weight: bold;
+}
+
+.uber-pill-stem {
+  width: 2px;
+  height: 8px;
+  background-color: #000000;
+}
+
+.uber-pill-base-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #000000;
+  border-radius: 50%;
+  border: 1.5px solid #ffffff;
+}
+
+/* Mini courier vehicle icons on map */
+.uber-courier-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.25));
+  transition: all 0.3s ease;
+}
+
