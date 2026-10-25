@@ -13,6 +13,11 @@ export type SubCity =
 
 export type VehicleType = 'motorcycle' | 'bicycle';
 
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+}
+
 export type PayerType = 'sender' | 'receiver';
 
 export type DeliveryStatus =

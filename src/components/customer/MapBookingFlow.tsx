@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { 
   Bike, 
   ArrowRight, 
@@ -9,8 +9,9 @@ import {
 } from 'lucide-react';
 import { SubCity, VehicleType, PayerType, PackageCategory, Delivery } from '../../types/delivery';
 import { calculateFareQuote } from '../../data/addisLocations';
-import { MapRouteVisualizer } from './MapRouteVisualizer';
+import { LeafletMap } from './LeafletMap';
 import { LocationSearchInput } from './LocationSearchInput';
+import { RouteResult } from '../../services/routingService';
 
 // Validation for Ethiopian mobile numbers (+2519..., +2517..., 09..., 07..., 9..., 7...)
 export function isValidEthiopianPhone(phone: string): boolean {
@@ -36,6 +37,9 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
   const [dropoffSubcity, setDropoffSubcity] = useState<SubCity>('Kirkos');
   const [dropoffLandmark, setDropoffLandmark] = useState('Kazanchis, ECA / UNECA Headquarters');
 
+  // Real road distance in km retrieved from OSRM router
+  const [roadDistanceKm, setRoadDistanceKm] = useState<number | undefined>(undefined);
+
   // Vehicle Type
   const [vehicleType, setVehicleType] = useState<VehicleType>('motorcycle');
 
@@ -55,14 +59,18 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
   const [payerType, setPayerType] = useState<PayerType>('sender');
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Quotes for both vehicles to display in the vehicle cards
+  const handleRouteCalculated = useCallback((route: RouteResult) => {
+    setRoadDistanceKm(route.distanceKm);
+  }, []);
+
+  // Quotes for both vehicles to display in the vehicle cards connected to actual road distance
   const motorcycleQuote = useMemo(() => {
-    return calculateFareQuote(pickupSubcity, dropoffSubcity, 'motorcycle', packageWeightKg);
-  }, [pickupSubcity, dropoffSubcity, packageWeightKg]);
+    return calculateFareQuote(pickupSubcity, dropoffSubcity, 'motorcycle', packageWeightKg, roadDistanceKm);
+  }, [pickupSubcity, dropoffSubcity, packageWeightKg, roadDistanceKm]);
 
   const bicycleQuote = useMemo(() => {
-    return calculateFareQuote(pickupSubcity, dropoffSubcity, 'bicycle', packageWeightKg);
-  }, [pickupSubcity, dropoffSubcity, packageWeightKg]);
+    return calculateFareQuote(pickupSubcity, dropoffSubcity, 'bicycle', packageWeightKg, roadDistanceKm);
+  }, [pickupSubcity, dropoffSubcity, packageWeightKg, roadDistanceKm]);
 
   const selectedQuote = vehicleType === 'motorcycle' ? motorcycleQuote : bicycleQuote;
 
@@ -577,7 +585,7 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
                   </div>
 
                   <p className="text-[10px] text-slate-500">
-                    Final fare payable to courier upon {payerType === 'sender' ? 'pickup' : 'delivery'}. Includes all platform processing; no extra fees.
+                    Final delivery fare. No additional platform fee.
                   </p>
                 </div>
 
@@ -595,15 +603,23 @@ export const MapBookingFlow: React.FC<MapBookingFlowProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Visual Vector Route Map */}
+        {/* Right Column: Interactive Real OpenStreetMap Map */}
         <div className="lg:col-span-7 space-y-3">
-          <MapRouteVisualizer
+          <LeafletMap
             pickupSubcity={pickupSubcity}
             pickupLandmark={pickupLandmark}
+            onSelectPickup={(sc, lm) => {
+              setPickupSubcity(sc);
+              setPickupLandmark(lm);
+            }}
             dropoffSubcity={dropoffSubcity}
             dropoffLandmark={dropoffLandmark}
-            distanceKm={selectedQuote.estimatedDistanceKm}
+            onSelectDropoff={(sc, lm) => {
+              setDropoffSubcity(sc);
+              setDropoffLandmark(lm);
+            }}
             vehicleType={vehicleType}
+            onRouteCalculated={handleRouteCalculated}
           />
 
           {/* Quick info bar below map */}
