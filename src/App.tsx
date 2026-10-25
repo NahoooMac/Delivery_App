@@ -166,8 +166,8 @@ export function App() {
 
       {/* Main Container */}
       <main className="w-full flex-1 flex flex-col items-center justify-start py-4 sm:py-6 px-2 sm:px-4">
-        {/* Phone Frame View on Desktop (Matching user screenshot) */}
-        {viewMode === 'phone' ? (
+        {/* Phone Frame View on Desktop for Customer and Courier, Full-Width for Admin */}
+        {viewMode === 'phone' && activePortal !== 'admin' ? (
           <div className="flex flex-col items-center justify-center w-full max-w-md">
             {/* Desktop Top Title & Icon (Matching Screenshot 1 & 2) */}
             <div className="hidden md:flex flex-col items-center justify-center mb-5">
@@ -205,7 +205,7 @@ export function App() {
               </div>
 
               {/* Inside Screen Content Area */}
-              <div className="flex-1 w-full relative flex flex-col overflow-hidden pb-14">
+              <div className={`flex-1 w-full relative flex flex-col overflow-hidden ${activePortal === 'customer' ? 'pb-14' : ''}`}>
                 {activePortal === 'customer' && (
                   <>
                     {customerTab === 'book' && (
@@ -233,25 +233,17 @@ export function App() {
                 )}
 
                 {activePortal === 'courier' && (
-                  <div className="h-full overflow-y-auto bg-neutral-900 text-white p-3">
-                    <CourierJobBoardPreview
-                      deliveries={deliveries}
-                      onClaimDelivery={handleClaimDelivery}
-                    />
-                  </div>
-                )}
-
-                {activePortal === 'admin' && (
-                  <div className="h-full overflow-y-auto bg-neutral-900 text-white p-3">
-                    <AdminAuditPreview />
-                  </div>
+                  <CourierJobBoardPreview
+                    deliveries={deliveries}
+                    onClaimDelivery={handleClaimDelivery}
+                  />
                 )}
               </div>
             </div>
           </div>
         ) : (
           /* Full Screen View on Desktop */
-          <div className="w-full max-w-5xl h-[86vh] bg-white text-black rounded-3xl overflow-hidden shadow-2xl relative flex flex-col border border-neutral-800">
+          <div className="w-full max-w-6xl h-[88vh] bg-white text-black rounded-3xl overflow-hidden shadow-2xl relative flex flex-col border border-neutral-800">
             {activePortal === 'customer' && (
               <>
                 <div className="flex-1 relative overflow-hidden pb-14">
@@ -281,7 +273,7 @@ export function App() {
             )}
 
             {activePortal === 'courier' && (
-              <div className="h-full overflow-y-auto bg-neutral-950 text-white p-6">
+              <div className="flex-1 overflow-hidden">
                 <CourierJobBoardPreview
                   deliveries={deliveries}
                   onClaimDelivery={handleClaimDelivery}
@@ -290,8 +282,8 @@ export function App() {
             )}
 
             {activePortal === 'admin' && (
-              <div className="h-full overflow-y-auto bg-neutral-950 text-white p-6">
-                <AdminAuditPreview />
+              <div className="flex-1 overflow-hidden">
+                <AdminAuditPreview deliveries={deliveries} />
               </div>
             )}
           </div>
