@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { ArrowLeft, Locate, Loader2, AlertTriangle } from 'lucide-react';
+import { Locate, Loader2, Navigation, Info } from 'lucide-react';
 import { SubCity, GeoPoint } from '../../types/delivery';
 import { findNearestLandmark } from '../../data/addisLocations';
 import { RouteResult } from '../../services/routingService';
@@ -17,8 +17,9 @@ interface LeafletMapProps {
   vehicleType: 'motorcycle' | 'bicycle';
   currentRoute: RouteResult | null;
   isLoadingRoute: boolean;
-  onBack?: () => void;
-  showBackButton?: boolean;
+  userLocation?: GeoPoint | null;
+  onRequestLocation?: () => void;
+  isLocating?: boolean;
 }
 
 const MAPBOX_TOKEN =
@@ -38,16 +39,18 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
   vehicleType,
   currentRoute,
   isLoadingRoute,
-  onBack,
-  showBackButton = false,
+  userLocation,
+  onRequestLocation,
+  isLocating = false,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const pickupMarkerRef = useRef<L.Marker | null>(null);
   const dropoffMarkerRef = useRef<L.Marker | null>(null);
+  const userLocationMarkerRef = useRef<L.Marker | null>(null);
   const routeCasingRef = useRef<L.Polyline | null>(null);
   const routeCoreRef = useRef<L.Polyline | null>(null);
-  const courierMarkersRef = useRef<L.Marker[]>([]);
+  const mockRidersRef = useRef<L.Marker[]>([]);
 
   const [pinMode, setPinMode] = useState<'pickup' | 'dropoff'>('dropoff');
   const [clickNotice, setClickNotice] = useState<string | null>(null);
@@ -63,11 +66,11 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     pinModeRef.current = pinMode;
   }, [onSelectPickup, onSelectDropoff, pinMode]);
 
-  // 1. Initialize Leaflet Map with Mapbox Navigation Day Tiles
+  // 1. Initialize Full-Screen Map with Mapbox Navigation Day Tiles
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    // Center of Addis Ababa
+    // Center of Addis Ababa (Bole / Meskel Square corridor)
     const addisCenter: L.LatLngExpression = [9.0108, 38.7613];
 
     const map = L.map(mapContainerRef.current, {
@@ -75,14 +78,14 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       zoom: 14,
       minZoom: 10,
       maxZoom: 19,
-      zoomControl: false, // Clean custom position or minimal Uber controls
+      zoomControl: false,
       attributionControl: true,
     });
 
-    // Add minimal zoom control to top-right
+    // Add clean zoom control top-right
     L.control.zoom({ position: 'topright' }).addTo(map);
 
-    // Mapbox Navigation Day Retina Tiles (Clean light gray/blue palette matching Uber Rides)
+    // Mapbox Navigation Day Retina Tiles (Clean street geography matching Yango/Uber)
     const tileUrl = MAPBOX_TOKEN
       ? `https://api.mapbox.com/styles/v1/mapbox/navigation-day-v1/tiles/512/{z}/{x}/{y}@2x?access_token=${MAPBOX_TOKEN}`
       : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
@@ -96,11 +99,6 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       maxZoom: 19,
     });
 
-    // Fallback to CartoDB Voyager if Mapbox encounters any network hiccups
-    tileLayer.on('tileerror', () => {
-      // Keep tileLayer resilient
-    });
-
     tileLayer.addTo(map);
 
     // Map click handler: preserves exact coordinates while looking up nearest landmark
@@ -110,16 +108,16 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
 
       if (pinModeRef.current === 'pickup') {
         onSelectPickupRef.current(nearest.subcity, nearest.landmark, { lat, lng });
-        setClickNotice(`Pickup set: ${nearest.landmark}`);
+        setClickNotice(`Pickup pinned: ${nearest.landmark}`);
       } else {
         onSelectDropoffRef.current(nearest.subcity, nearest.landmark, { lat, lng });
-        setClickNotice(`Destination set: ${nearest.landmark}`);
+        setClickNotice(`Destination pinned: ${nearest.landmark}`);
       }
 
-      setTimeout(() => setClickNotice(null), 3000);
+      setTimeout(() => setClickNotice(null), 3500);
     });
 
-    // Invalidate map size on container resize
+    // ResizeObserver ensures full viewport canvas on mobile orientation or window resize
     const resizeObserver = new ResizeObserver(() => {
       map.invalidateSize();
     });
@@ -147,21 +145,69 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         dropoffMarkerRef.current.remove();
         dropoffMarkerRef.current = null;
       }
-      courierMarkersRef.current.forEach((m) => m.remove());
-      courierMarkersRef.current = [];
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
+        userLocationMarkerRef.current = null;
+      }
+      mockRidersRef.current.forEach((m) => m.remove());
+      mockRidersRef.current = [];
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []);
 
-  // 2. Calculate dynamic ETA for dropoff badge
+  // 2. Real User Location Marker (Pulsing Blue GPS Dot)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (!userLocation) {
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
+        userLocationMarkerRef.current = null;
+      }
+      return;
+    }
+
+    const gpsIcon = L.divIcon({
+      className: 'user-gps-marker',
+      html: `
+        <div style="position: relative; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
+          <div style="position: absolute; width: 22px; height: 22px; border-radius: 50%; background: rgba(59, 130, 246, 0.35); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+          <div style="width: 14px; height: 14px; border-radius: 50%; background: #2563eb; border: 2.5px solid #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.3);"></div>
+        </div>
+      `,
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    });
+
+    if (!userLocationMarkerRef.current) {
+      const marker = L.marker([userLocation.lat, userLocation.lng], {
+        icon: gpsIcon,
+        zIndexOffset: 100,
+      }).addTo(map);
+
+      marker.bindPopup(
+        `<div style="font-size: 11px; font-weight: bold; color: #111827; padding: 2px;">
+          📍 Your Real GPS Location<br/>
+          <span style="font-size: 10px; color: #6b7280; font-weight: normal;">Lat: ${userLocation.lat.toFixed(5)}, Lng: ${userLocation.lng.toFixed(5)}</span>
+        </div>`
+      );
+
+      userLocationMarkerRef.current = marker;
+    } else {
+      userLocationMarkerRef.current.setLatLng([userLocation.lat, userLocation.lng]);
+    }
+  }, [userLocation]);
+
+  // 3. Dynamic ETA for drop-off marker
   const estMinutes = currentRoute
     ? vehicleType === 'motorcycle'
       ? Math.max(3, Math.round(currentRoute.durationMinutes * 0.9))
       : Math.max(5, Math.round(currentRoute.distanceKm * 4.5 + 8))
     : 12;
 
-  // 3. Render Draggable Uber Address Pills
+  // 4. Draggable Pickup and Drop-off Markers with Exact Coordinates
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -169,18 +215,18 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     const shortPickup = (pickupLandmark || pickupSubcity).split(',')[0].trim();
     const shortDropoff = (dropoffLandmark || dropoffSubcity).split(',')[0].trim();
 
-    // Pickup Icon: Uber Pill with black square
+    // Pickup Icon (Yango / Uber Green Square Pin)
     const pickupIcon = L.divIcon({
       className: 'uber-map-pin',
       html: `
         <div class="uber-marker-container">
-          <div class="uber-pill">
-            <span class="uber-pill-square"></span>
+          <div class="uber-pill" style="border-left: 3px solid #10b981;">
+            <span class="uber-pill-square" style="background-color: #10b981;"></span>
             <span class="uber-pill-text">${shortPickup}</span>
             <span class="uber-pill-chevron">›</span>
           </div>
-          <div class="uber-pill-stem"></div>
-          <div class="uber-pill-base-dot"></div>
+          <div class="uber-pill-stem" style="background-color: #10b981;"></div>
+          <div class="uber-pill-base-dot" style="background-color: #10b981;"></div>
         </div>
       `,
       iconSize: [150, 42],
@@ -188,12 +234,12 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       popupAnchor: [0, -42],
     });
 
-    // Dropoff Icon: Uber Pill with black ETA badge
+    // Dropoff Icon (Black/Gold ETA Pin)
     const dropoffIcon = L.divIcon({
       className: 'uber-map-pin',
       html: `
         <div class="uber-marker-container">
-          <div class="uber-pill">
+          <div class="uber-pill" style="border-left: 3px solid #000000;">
             <span class="uber-pill-eta">${estMinutes}<br/><span style="font-size:7px;font-weight:700;">MIN</span></span>
             <span class="uber-pill-text">${shortDropoff}</span>
             <span class="uber-pill-chevron">›</span>
@@ -262,7 +308,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     estMinutes,
   ]);
 
-  // 4. Render Authentic Uber Route Polyline (Bold Black with subtle white casing)
+  // 5. Render Authentic Road Route Polyline
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !currentRoute) return;
@@ -278,7 +324,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
 
     const isRealRoad = currentRoute.isRealRoad && (currentRoute.source === 'mapbox_road' || currentRoute.source === 'osrm_road');
 
-    // Casing line (soft white outer border)
+    // Casing line (clean white outer halo for high road visibility)
     const casingPolyline = L.polyline(currentRoute.coordinates, {
       color: '#ffffff',
       weight: 8,
@@ -287,84 +333,135 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       lineJoin: 'round',
     }).addTo(map);
 
-    // Core route line (Solid Pure Black #000000 like Uber)
+    // Core route line (Solid Pure Black)
     const corePolyline = L.polyline(currentRoute.coordinates, {
       color: '#000000',
       weight: 5,
       opacity: 1.0,
       lineCap: 'round',
       lineJoin: 'round',
-      dashArray: isRealRoad ? undefined : '7, 8', // Distinct dash if fallback straight line
+      dashArray: isRealRoad ? undefined : '7, 8',
     }).addTo(map);
 
     routeCasingRef.current = casingPolyline;
     routeCoreRef.current = corePolyline;
 
-    // Zoom and pan to fit the route with comfortable padding
     if (pickupMarkerRef.current && dropoffMarkerRef.current) {
       const group = L.featureGroup([pickupMarkerRef.current, dropoffMarkerRef.current, corePolyline]);
       map.fitBounds(group.getBounds(), {
-        paddingTopLeft: [70, 40],
-        paddingBottomRight: [40, 220], // Extra bottom padding for the Uber bottom sheet
+        paddingTopLeft: [60, 30],
+        paddingBottomRight: [30, 240], // Room for the compact bottom sheet
         maxZoom: 16,
       });
     }
-
-    // 5. Add 2-3 realistic mini courier markers on the map nearby (just like the cars in the Uber screenshot)
-    courierMarkersRef.current.forEach((m) => m.remove());
-    courierMarkersRef.current = [];
-
-    const coords = currentRoute.coordinates;
-    if (coords && coords.length > 4) {
-      const samplePoints = [
-        coords[Math.floor(coords.length * 0.25)],
-        coords[Math.floor(coords.length * 0.65)],
-      ];
-
-      samplePoints.forEach((pt, idx) => {
-        // Offset slightly to simulate driving on adjacent lane
-        const offsetLat = pt[0] + (idx === 0 ? 0.0008 : -0.0007);
-        const offsetLng = pt[1] + (idx === 0 ? 0.001 : -0.0008);
-
-        const courierIcon = L.divIcon({
-          className: 'uber-courier-marker',
-          html: `
-            <div style="background-color: #ffffff; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 8px rgba(0,0,0,0.25); border: 1.5px solid #000000; transform: rotate(${idx === 0 ? '45deg' : '-35deg'});">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="18.5" cy="17.5" r="3.5"/>
-                <circle cx="5.5" cy="17.5" r="3.5"/>
-                <circle cx="15" cy="5" r="1"/>
-                <path d="M12 17.5V14l-3-3 4-3 2 3h2"/>
-              </svg>
-            </div>
-          `,
-          iconSize: [26, 26],
-          iconAnchor: [13, 13],
-        });
-
-        const courierMarker = L.marker([offsetLat, offsetLng], {
-          icon: courierIcon,
-          interactive: false,
-        }).addTo(map);
-
-        courierMarkersRef.current.push(courierMarker);
-      });
-    }
   }, [currentRoute]);
+
+  // 6. Distinct Nearby Rider Markers (Motorcycle & Bicycle) with Honest Demo Data Transparency
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    mockRidersRef.current.forEach((m) => m.remove());
+    mockRidersRef.current = [];
+
+    // Realistic coordinates distributed near Central Addis (Bole / Kirkos / Kazanchis corridor)
+    const mockRiders = [
+      {
+        id: 'rider-moto-1',
+        type: 'motorcycle' as const,
+        name: 'Yonas (Motorcycle)',
+        plate: 'AA-2-B48192',
+        lat: pickupCoords.lat + 0.0028,
+        lng: pickupCoords.lng - 0.0035,
+        rating: 4.95,
+      },
+      {
+        id: 'rider-bike-1',
+        type: 'bicycle' as const,
+        name: 'Kidus (Bicycle Eco)',
+        plate: 'Bicycle Eco',
+        lat: pickupCoords.lat - 0.0022,
+        lng: pickupCoords.lng + 0.0032,
+        rating: 4.88,
+      },
+      {
+        id: 'rider-moto-2',
+        type: 'motorcycle' as const,
+        name: 'Biruk (Motorcycle)',
+        plate: 'AA-2-B31940',
+        lat: pickupCoords.lat + 0.0042,
+        lng: pickupCoords.lng + 0.0018,
+        rating: 4.82,
+      },
+    ];
+
+    mockRiders.forEach((rider) => {
+      const isMotorcycle = rider.type === 'motorcycle';
+
+      // Distinct Motorcycle vs Bicycle Icon
+      const icon = L.divIcon({
+        className: 'demo-rider-marker',
+        html: `
+          <div style="display: flex; flex-direction: column; align-items: center; cursor: pointer;">
+            <div style="background-color: ${isMotorcycle ? '#000000' : '#059669'}; color: white; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 2px solid #ffffff;">
+              ${
+                isMotorcycle
+                  ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="18.5" cy="17.5" r="3.5"/>
+                      <circle cx="5.5" cy="17.5" r="3.5"/>
+                      <circle cx="15" cy="5" r="1"/>
+                      <path d="M12 17.5V14l-3-3 4-3 2 3h2"/>
+                    </svg>`
+                  : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="5.5" cy="17.5" r="3.5"/>
+                      <circle cx="18.5" cy="17.5" r="3.5"/>
+                      <path d="M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 11.5L9 9l4-3 2 3h3"/>
+                    </svg>`
+              }
+            </div>
+            <span style="font-size: 8px; font-weight: 800; background: rgba(0,0,0,0.85); color: #ffffff; padding: 1px 4px; border-radius: 4px; margin-top: 2px; white-space: nowrap;">
+              ${isMotorcycle ? 'Moto' : 'Bike'} (Demo)
+            </span>
+          </div>
+        `,
+        iconSize: [36, 48],
+        iconAnchor: [18, 44],
+      });
+
+      const marker = L.marker([rider.lat, rider.lng], { icon }).addTo(map);
+
+      // Honest popup stating this is demo simulation
+      marker.bindPopup(`
+        <div style="font-size: 11px; padding: 2px; color: #111827; max-width: 180px;">
+          <div style="font-weight: 800; font-size: 12px; margin-bottom: 2px;">
+            ${rider.name}
+          </div>
+          <div style="font-size: 10px; color: #4b5563; margin-bottom: 4px;">
+            ${isMotorcycle ? 'Motorcycle' : 'Bicycle Eco'} • ★ ${rider.rating}
+          </div>
+          <div style="background: #fef3c7; border: 1px solid #fde68a; color: #92400e; padding: 3px 5px; border-radius: 6px; font-size: 9px; font-weight: 600;">
+            ⚠️ Simulated courier marker (Demo data — live telemetry requires backend dispatch).
+          </div>
+        </div>
+      `);
+
+      mockRidersRef.current.push(marker);
+    });
+  }, [pickupCoords.lat, pickupCoords.lng]);
 
   const handleRecenter = () => {
     if (mapInstanceRef.current) {
       if (routeCoreRef.current) {
         mapInstanceRef.current.fitBounds(routeCoreRef.current.getBounds(), {
-          paddingTopLeft: [70, 40],
-          paddingBottomRight: [40, 220],
+          paddingTopLeft: [60, 30],
+          paddingBottomRight: [30, 240],
           maxZoom: 16,
         });
       } else if (pickupMarkerRef.current && dropoffMarkerRef.current) {
         const group = L.featureGroup([pickupMarkerRef.current, dropoffMarkerRef.current]);
         mapInstanceRef.current.fitBounds(group.getBounds(), {
-          paddingTopLeft: [70, 40],
-          paddingBottomRight: [40, 220],
+          paddingTopLeft: [60, 30],
+          paddingBottomRight: [30, 240],
           maxZoom: 16,
         });
       }
@@ -372,24 +469,12 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full min-h-[380px] bg-neutral-100 overflow-hidden select-none">
-      {/* Mapbox Leaflet Container */}
-      <div ref={mapContainerRef} className="w-full h-full min-h-[380px]" />
+    <div className="relative w-full h-full min-h-[100dvh] bg-neutral-100 overflow-hidden select-none">
+      {/* Map DOM Container - Full Viewport */}
+      <div ref={mapContainerRef} className="w-full h-full min-h-[100dvh]" />
 
-      {/* Floating Uber Circular Back Button (Top Left) */}
-      {showBackButton && (
-        <button
-          type="button"
-          onClick={onBack}
-          className="absolute top-4 left-4 z-[500] flex h-10 w-10 items-center justify-center rounded-full bg-white text-black shadow-md border border-neutral-200/80 hover:bg-neutral-50 active:scale-95 transition-all"
-          title="Go back"
-        >
-          <ArrowLeft className="h-5 w-5 stroke-[2.5]" />
-        </button>
-      )}
-
-      {/* Top Floating Road Routing Info Pill */}
-      <div className={`absolute top-4 ${showBackButton ? 'left-16' : 'left-4'} z-[500] flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 shadow-md border border-neutral-200/80 backdrop-blur-md`}>
+      {/* Top Floating Routing Info Pill */}
+      <div className="absolute top-16 sm:top-20 left-4 z-[400] flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 shadow-md border border-neutral-200/90 backdrop-blur-md">
         {isLoadingRoute ? (
           <div className="flex items-center gap-1.5 text-xs font-semibold text-neutral-800">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-black" />
@@ -408,37 +493,30 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
                 Mapbox
               </span>
             )}
-            {currentRoute.source === 'osrm_road' && (
-              <span className="rounded bg-neutral-200 text-neutral-800 px-1.5 py-0.2 text-[9px] font-semibold">
-                OSRM
-              </span>
-            )}
           </div>
         ) : (
-          <span className="text-xs text-neutral-500 font-medium">Drag pins on map</span>
+          <span className="text-xs text-neutral-500 font-medium">Addis Ababa Delivery Zone</span>
         )}
       </div>
 
-      {/* Fallback Warning Notice if road server is unreachable */}
-      {currentRoute && currentRoute.source === 'fallback_estimate' && !isLoadingRoute && (
-        <div className="absolute top-16 left-4 z-[500] max-w-xs rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900 shadow-md flex items-center gap-1.5">
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-          <span>Approximate fallback estimate. Road routing server unavailable.</span>
-        </div>
-      )}
+      {/* Honest Demo Riders Disclaimer Pill on Map */}
+      <div className="absolute top-16 sm:top-20 right-4 z-[400] hidden sm:flex items-center gap-1.5 rounded-full bg-amber-50/95 border border-amber-200/80 px-2.5 py-1 text-[10px] font-semibold text-amber-900 shadow-sm backdrop-blur-md">
+        <Info className="h-3 w-3 text-amber-700 shrink-0" />
+        <span>Rider icons are simulated demo data</span>
+      </div>
 
-      {/* Pin Placement Mode Pill */}
-      <div className="absolute top-4 right-14 z-[500] hidden sm:flex items-center gap-1 rounded-full bg-white/95 p-1 shadow-md border border-neutral-200/80 text-xs">
+      {/* Pin Mode Pill */}
+      <div className="absolute top-28 left-4 z-[400] hidden sm:flex items-center gap-1 rounded-full bg-white/95 p-1 shadow-md border border-neutral-200 text-xs">
+        <span className="text-[10px] text-neutral-500 px-1.5 font-medium">Click map to set:</span>
         <button
           type="button"
           onClick={() => setPinMode('pickup')}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all ${
             pinMode === 'pickup'
-              ? 'bg-black text-white shadow-sm'
+              ? 'bg-emerald-600 text-white shadow-sm'
               : 'text-neutral-600 hover:text-black'
           }`}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-current"></span>
           <span>Pickup</span>
         </button>
         <button
@@ -450,27 +528,46 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
               : 'text-neutral-600 hover:text-black'
           }`}
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-current"></span>
           <span>Drop-off</span>
         </button>
       </div>
 
-      {/* Map Click Notice Toast */}
+      {/* Click Notice Toast */}
       {clickNotice && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[500] flex items-center gap-1.5 rounded-full bg-black text-white px-3.5 py-1.5 text-xs font-semibold shadow-lg animate-in fade-in">
+        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-[450] flex items-center gap-1.5 rounded-full bg-black text-white px-3.5 py-1.5 text-xs font-semibold shadow-lg animate-in fade-in">
           <span>{clickNotice}</span>
         </div>
       )}
 
-      {/* Floating Recenter Map Button (Bottom Right above bottom sheet) */}
-      <button
-        type="button"
-        onClick={handleRecenter}
-        className="absolute bottom-4 right-4 z-[500] flex h-10 w-10 items-center justify-center rounded-full bg-white text-black shadow-lg border border-neutral-200/80 hover:bg-neutral-50 active:scale-95 transition-all"
-        title="Fit route on map"
-      >
-        <Locate className="h-5 w-5 text-neutral-800" />
-      </button>
+      {/* Floating Map Actions (Recenter & Real GPS Locate) */}
+      <div className="absolute bottom-20 sm:bottom-8 right-4 z-[400] flex flex-col gap-2">
+        {/* Real GPS Locate Button */}
+        {onRequestLocation && (
+          <button
+            type="button"
+            onClick={onRequestLocation}
+            disabled={isLocating}
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-black shadow-lg border border-neutral-200 hover:bg-neutral-50 active:scale-95 transition-all"
+            title="Detect My Location (GPS)"
+          >
+            {isLocating ? (
+              <Loader2 className="h-5 w-5 animate-spin text-black" />
+            ) : (
+              <Navigation className="h-5 w-5 text-neutral-900" />
+            )}
+          </button>
+        )}
+
+        {/* Fit Route Button */}
+        <button
+          type="button"
+          onClick={handleRecenter}
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-black shadow-lg border border-neutral-200 hover:bg-neutral-50 active:scale-95 transition-all"
+          title="Fit Route"
+        >
+          <Locate className="h-5 w-5 text-neutral-800" />
+        </button>
+      </div>
     </div>
   );
 };
