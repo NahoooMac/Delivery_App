@@ -91,21 +91,24 @@ sequenceDiagram
     Requester->>System: Enter Pickup, Drop-off, Landmarks, Vehicle, Package Details
     System->>System: Calculate estimated distance and fare (motorcycle vs bicycle)
     Requester->>System: Select Payer (sender / receiver) & Submit Order
-    System->>DB: Insert Delivery (status: requested) & generate verification_otp_hash
+    System->>DB: Insert Delivery (status: requested; verification_otp fields NULL)
     System-->>Courier: Broadcast order on Job Board (filtered by exact vehicle match)
-    Courier->>System: Claim Job (atomic lock)
+    Courier->>System: Claim Job (atomic lock on rider_profiles & target row)
     System->>DB: Atomic Update: status -> assigned (rider_id set)
     System-->>Requester: Notify Courier Assigned (Name, Phone, Plate/Vehicle)
     Courier->>System: Arrive at pickup landmark -> status: arrived_pickup
     Note over Requester,Courier: If sender pays: Courier collects fare (Cash / Telebirr / CBE ref)
     Courier->>System: Collect parcel -> status: picked_up
-    System-->>Requester: Delivery in transit
+    System->>DB: Generate 4-digit recipient OTP (HMAC salt/hash, 60m expiry)
+    System-->>Recipient: SMS notification with 4-digit verification OTP
+    System-->>Requester: Delivery in transit notification
     Courier->>System: Arrive at destination landmark -> status: arrived_dropoff
     Note over Courier,Recipient: If receiver pays: Courier collects fare FIRST (Cash / Telebirr / CBE ref)
     Courier->>Recipient: Request 4-digit recipient verification OTP
     Recipient->>Courier: Provides OTP
     Courier->>System: Submit 4-digit OTP
-    System->>DB: Verify HMAC hash -> status: delivered
+    System->>DB: Server-side validation: (1) Valid OTP & (2) Receiver payment recorded
+    System->>DB: Atomic Update: status -> delivered
     System->>DB: Idempotent Insert into commission_ledger (entry_type: commission_accrual)
     System-->>Requester: Delivery Completed notification
 ```
@@ -163,6 +166,7 @@ sequenceDiagram
 - **Proof of Delivery & Idempotent Commission Accrual**:
   - Courier asks recipient for the 4-digit recipient OTP and submits it.
   - The backend executes an atomic transaction that acquires a row-level lock on `rider_profiles` to serialize the courier's financial ledger balance.
+  - **Server-Side Payment Enforcement**: If `payer_type = 'receiver'`, the database transaction validates within the update query that a recorded payment (`collected_cash_rider_confirmed`, `collected_unverified`, or `verified`) exists in the `payments` table. If missing, the transition is rejected with `400 Bad Request: Payment collection must be recorded before completing delivery handover`.
   - The state transition from `arrived_dropoff` $\rightarrow$ `delivered` and the insertion of the `commission_accrual` debit into `commission_ledger` are atomically linked (via CTE).
   - The commission ledger insert occurs **if and only if** the delivery update succeeds and the recipient OTP is valid, unexpired, and unused.
   - Retries, network timeouts, or duplicate OTP submissions are safely handled without duplicate ledger debits (guaranteed by the unique index `idx_unique_delivery_commission`).

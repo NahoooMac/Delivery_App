@@ -10,7 +10,7 @@ This review evaluates [`docs/MVP_SPEC_UPDATED.md`](file:///e:/Personal/delivery%
 ### Overall Assessment
 The updated specifications demonstrate strong architectural discipline. Key decisions—limiting the pilot to Addis Ababa, restricting delivery-fee payers to sender or receiver, deferring business billing, establishing test commission baselines (15% motorcycle / 10% bicycle), separating payment verification from physical handover, and hardening OTP entropy—are well reflected.
 
-However, our forensic cross-review identified **5 critical/high-priority gaps and inconsistencies** that must be resolved prior to locking the database schema.
+Our forensic cross-review initially identified **5 critical/high-priority gaps and inconsistencies**. As documented below, all 5 gaps, along with all operational questions, have been **100% resolved and verified** in [`docs/MVP_SPEC.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/MVP_SPEC.md), [`docs/DATABASE_DESIGN.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/DATABASE_DESIGN.md), and [`docs/PRE_STAGE_2_DECISIONS.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/PRE_STAGE_2_DECISIONS.md).
 
 ---
 
@@ -135,33 +135,33 @@ Clarify in `commission_ledger`:
 
 ---
 
-## 4. Unresolved Decisions & Open Questions
+## 4. Resolved Decisions & Closed Policy Questions
 
-The following business rules require stakeholder confirmation:
+The operational questions originally raised in this review have been formally decided and incorporated into [`docs/MVP_SPEC.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/MVP_SPEC.md) and [`docs/PRE_STAGE_2_DECISIONS.md`](file:///e:/Personal/delivery%20app/Delivery_APP_system/docs/PRE_STAGE_2_DECISIONS.md):
 
-| # | Question | Current Proposal / Assumption | Decision Impact |
+| # | Question | Final Decision | Status in Current Docs |
 | :- | :--- | :--- | :--- |
-| **U1** | **Cancellation Fee Commission** | When a sender cancels after rider arrival and pays the cancellation fee (25 or 40 ETB), does the platform take commission on that fee? | **Proposal**: Platform waives commission on cancellation fees during MVP; 100% of the cancellation fee goes to the rider to compensate for fuel/effort. |
-| **U2** | **Failed Delivery Collection** | If recipient is unreachable after arrival and parcel is returned to sender, when does the rider collect the fare + return fee? | **Proposal**: Rider collects fare upon returning package to sender. If sender refuses to pay, incident is flagged for admin dispute resolution. |
-| **U3** | **OTP Expiry Duration** | What is the exact expiration window for the dropoff OTP? | **Proposal**: OTP expires 60 minutes after order enters `ASSIGNED`, with an in-app "Resend OTP" button for the sender. |
-| **U4** | **OTP Max Failed Attempts** | How many failed OTP entries are allowed before locking? | **Proposal**: Maximum 5 failed attempts, after which the status locks and requires admin phone verification to prevent brute-forcing. |
-| **U5** | **Rider Debt Ceiling Grace Buffer** | Can a rider accept an order that pushes their debt slightly above 500 ETB? | **Proposal**: Debt ceiling check runs *before* claiming. If current debt $\ge$ 500.00 ETB, claiming is blocked. |
+| **U1** | **Cancellation Fee Commission** | Platform waives commission on cancellation fees during MVP (0% platform cut). 100% of the 25 ETB (bicycle) or 40 ETB (motorcycle) fee belongs to the courier. No commission debit is logged. | **RESOLVED & VERIFIED**: Documented in `MVP_SPEC.md` Step 4 and `DATABASE_DESIGN.md` Section 3.8. |
+| **U2** | **Failed Delivery Collection** | Failed drop-off does not trigger commission accrual (delivery was not completed). Courier returns parcel to sender. If sender refuses original fare, order is escalated for admin dispute resolution without automatic wallet debit. | **RESOLVED & VERIFIED**: Documented in `MVP_SPEC.md` Step 6 and `DATABASE_DESIGN.md` Section 3.8. |
+| **U3** | **OTP Expiry Duration & Timing** | Recipient OTP is generated at `picked_up` with a strict 60-minute expiry window. Fields are `NULL` prior to parcel pickup. | **RESOLVED & VERIFIED**: Fully aligned in `MVP_SPEC.md` workflow diagram, Step 4/5, and `DATABASE_DESIGN.md` Section 3.6. |
+| **U4** | **OTP Max Failed Attempts** | Maximum 5 failed attempts allowed before verification is locked (`verification_locked = true`), requiring sender in-app reset or admin phone verification override. | **RESOLVED & VERIFIED**: Specified in `DATABASE_DESIGN.md` Section 3.6 and Section 4.2. |
+| **U5** | **Rider Debt Ceiling Grace Buffer** | Debt ceiling check is strictly enforced: couriers with verified debt $\ge 500.00$ ETB cannot claim jobs. Unverified settlement submissions (`pending_verification`) do not reduce active debt. | **RESOLVED & VERIFIED**: Specified in `DATABASE_DESIGN.md` Section 3.9 and Section 4.1. |
 
 ---
 
 ## 5. Checklist for Approving the Database Design
 
-Before executing any migrations or DDL in Stage 2, verify that every item on this checklist is satisfied:
+All items required before executing database migrations or DDL in Stage 2 have been satisfied and verified across the active documentation:
 
-- [ ] **Geographic Scope**: All address models specify Addis Ababa sub-cities and landmarks.
-- [ ] **Payer Type**: `deliveries.payer_type` is constrained strictly to `'sender'` and `'receiver'`.
-- [ ] **Monetary Precision**: Every monetary column in `pricing_rules`, `deliveries`, `payments`, and `commission_ledger` is strictly `NUMERIC(12, 2)`.
-- [ ] **Pricing Snapshot**: `deliveries` captures both `commission_rate_pct` (15.00 or 10.00) and `commission_amount` at creation time.
-- [ ] **Duplicate Payment Guard**: A partial unique index ensures only one successful payment record per delivery.
-- [ ] **Payment Independence**: Database schema allows `deliveries.status = 'delivered'` while `payments.payment_status = 'collected_unverified'`.
-- [ ] **Rider Compliance**: `rider_profiles` includes fields for ID card, driver's license (motorcycle), vehicle Libre ownership document (motorcycle), and emergency contact.
-- [ ] **Cancellation Audit**: `deliveries` includes `cancelled_by_user_id`, `cancellation_reason`, and `cancellation_fee`.
-- [ ] **OTP Security**: `deliveries` contains `verification_otp_hash` (peppered HMAC), `verification_otp_expires_at`, `verification_otp_used_at`, and `verification_attempts`.
-- [ ] **Concurrency**: Atomic claim procedure validates zero active jobs for the claiming rider and uses row locking.
-- [ ] **Ledger Immutability**: `commission_ledger` is append-only; unverified settlements do not artificially clear debt ceilings until admin approval.
-- [ ] **Environment Isolation**: Schema design specifies testing on an isolated Neon development branch or separate development database prior to production deployment.
+- [x] **Geographic Scope**: All address models specify Addis Ababa sub-cities and landmarks (`DATABASE_DESIGN.md` Section 3.6 `deliveries`).
+- [x] **Payer Type**: `deliveries.payer_type` is constrained strictly to `'sender'` and `'receiver'` (`DATABASE_DESIGN.md` Section 3.6).
+- [x] **Monetary Precision**: Every monetary column in `pricing_rules`, `deliveries`, `payments`, and `commission_ledger` is strictly `NUMERIC(12, 2)` (`DATABASE_DESIGN.md` Section 3.1-3.9).
+- [x] **Pricing Snapshot**: `deliveries` captures both `commission_rate_pct` (15.00 or 10.00) and `commission_amount` at creation time (`DATABASE_DESIGN.md` Section 3.6).
+- [x] **Duplicate Payment Guard**: Three partial unique indexes on `payments` enforce at most one successful fee collection per type (`idx_payments_single_successful_delivery_fare`, `idx_payments_single_cancellation_fee`, `idx_payments_single_return_fare`) (`DATABASE_DESIGN.md` Section 5).
+- [x] **Payment Independence & Server-Side Guard**: Delivery completion (`delivered`) is decoupled from backoffice electronic payment reconciliation (`verified`), allowing `collected_unverified` to complete delivery, while strictly enforcing via server-side CTE that receiver-paid deliveries have a recorded payment before handover (`DATABASE_DESIGN.md` Section 4.2).
+- [x] **Rider Compliance**: `rider_profiles` includes fields for ID card, driver's license (motorcycle), vehicle Libre ownership document (motorcycle: `ownership_doc_url`), and emergency contact (`emergency_contact_name`, `emergency_contact_phone`) (`DATABASE_DESIGN.md` Section 3.4).
+- [x] **Cancellation Audit**: `deliveries` includes `cancelled_by_user_id`, `cancellation_reason`, and `cancellation_fee` (`DATABASE_DESIGN.md` Section 3.6).
+- [x] **OTP Security**: `deliveries` contains `verification_otp_hash` (peppered HMAC), `verification_otp_salt`, `verification_otp_expires_at`, `verification_otp_used_at`, and `verification_attempts` (`DATABASE_DESIGN.md` Section 3.6).
+- [x] **Concurrency & Single Active Job**: Atomic claim procedure validates zero active jobs for the courier via pessimistic row lock on `rider_profiles`, backed by the database-level partial unique index `idx_single_active_delivery_per_rider` across all canonical active states (`DATABASE_DESIGN.md` Section 4.1 & Section 5).
+- [x] **Ledger Immutability**: `commission_ledger` is append-only with serialized courier row locking; unverified settlements do not artificially clear debt ceilings until admin approval (`DATABASE_DESIGN.md` Section 3.9 & Section 4.2).
+- [x] **Environment Isolation**: Schema design specifies testing on an isolated Neon development branch or separate development database prior to production deployment (`DEVELOPMENT_ROADMAP.md` Stage 2).

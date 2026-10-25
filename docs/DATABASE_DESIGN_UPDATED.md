@@ -374,12 +374,30 @@ Append-only source of truth tracking platform commission owed by couriers and ma
 ### 4.1 Atomic Job Claiming & Concurrency Guard
 Prevents duplicate assignments and enforces that a courier may only hold **one active delivery** across all non-terminal states (`assigned`, `arrived_pickup`, `picked_up`, `arrived_dropoff`, and `failed`). 
 
-Because locking delivery rows alone cannot lock anything if the courier currently holds 0 deliveries, concurrency control begins with a **courier-level row lock on `rider_profiles`**, backed by a database-level partial unique index:
+#### 4.1.1 Formal Concurrency Analysis & Safety Proof
+1. **Multi-Path Lock Uniformity**:
+   Every code path that assigns a delivery to a courier:
+   - **Path A: Courier Self-Claim from Job Board** (`claimDeliveryAction`)
+   - **Path B: Administrator Direct Assignment** (`adminAssignCourierAction`)
+   - **Path C: Administrator Reassignment / Dispatch Override** (`adminReassignCourierAction`)
+   **MUST** execute the identical pessimistic row lock on `rider_profiles` before checking or updating delivery records.
+2. **Mutual Exclusion Proof**:
+   Because every registered courier has exactly one row in `rider_profiles`, `SELECT ... FROM rider_profiles WHERE user_id = :target_rider_id FOR UPDATE` acquires an exclusive row-level lock. If two operations for the same courier race concurrently (e.g., two concurrent self-claims, or a self-claim racing with an administrator dispatch), the second transaction blocks at line 1 until the first commits or rolls back. When unblocked, the second transaction reads the committed state and finds either:
+   - The courier now has 1 active delivery (aborting with `409 Conflict`), or
+   - The courier's debt ceiling is exceeded (aborting with `403 Forbidden`).
+3. **Canonical Active Status Invariant**:
+   The active statuses checked in Step 4 and indexed in `idx_single_active_delivery_per_rider`:
+   `WHERE status IN ('assigned', 'arrived_pickup', 'picked_up', 'arrived_dropoff', 'failed')`
+   exactly match the platform's state machine. Terminal statuses (`delivered`, `returned`, `cancelled`) and unassigned status (`requested`) are excluded. `failed` is explicitly included because the courier retains custody of the physical parcel until returned to the sender.
+4. **Database-Level Defense-in-Depth**:
+   Even if an application server bug bypassed the `rider_profiles` row lock, PostgreSQL's partial unique index `idx_single_active_delivery_per_rider` guarantees at the storage engine level that no two rows can have the same `rider_id` with an active status. Any concurrent insert or update violating this invariant is aborted immediately by PostgreSQL with error code `23505` (`unique_violation`).
+
+#### 4.1.2 SQL Specification: Courier Self-Claim (`Path A`)
 
 ```sql
 BEGIN;
 
--- 1. Courier-Level Lock: Serialize all claim operations for this specific courier
+-- 1. Courier-Level Lock: Serialize all assignment operations for this specific courier
 -- Because every registered courier has exactly 1 row in rider_profiles, FOR UPDATE always acquires a lock
 SELECT user_id, verification_status, current_debt 
 FROM rider_profiles 
@@ -421,8 +439,50 @@ INSERT INTO delivery_status_history (
 COMMIT;
 ```
 
+#### 4.1.3 SQL Specification: Administrator Manual Assignment (`Path B / C`)
+
+```sql
+BEGIN;
+
+-- 1. Courier-Level Lock: Acquire exclusive lock on target courier
+SELECT user_id, verification_status, current_debt 
+FROM rider_profiles 
+WHERE user_id = :target_rider_id 
+FOR UPDATE;
+
+-- 2. Verify target courier is approved and under debt ceiling (< 500.00 ETB)
+-- If not eligible: ROLLBACK and return 400 Bad Request with failure reason.
+
+-- 3. Verify target courier currently holds ZERO active deliveries
+SELECT id FROM deliveries 
+WHERE rider_id = :target_rider_id 
+  AND status IN ('assigned', 'arrived_pickup', 'picked_up', 'arrived_dropoff', 'failed')
+LIMIT 1;
+-- If any row exists: ROLLBACK and return 409 Conflict: 'Target courier already holds an active delivery'.
+
+-- 4. Atomically assign or reassign target delivery
+UPDATE deliveries
+SET status = 'assigned',
+    rider_id = :target_rider_id,
+    assigned_at = NOW(),
+    updated_at = NOW()
+WHERE id = :delivery_id 
+  AND status IN ('requested', 'assigned')
+RETURNING id, status AS previous_status;
+-- If 0 rows updated: ROLLBACK and return 409 Conflict: 'Delivery cannot be assigned in current status'.
+
+-- 5. Record audit history with admin actor ID
+INSERT INTO delivery_status_history (
+    delivery_id, from_status, to_status, changed_by_user_id, notes
+) VALUES (
+    :delivery_id, :previous_status, 'assigned', :admin_user_id, :admin_assignment_reason
+);
+
+COMMIT;
+```
+
 ### 4.2 Idempotent Commission Accrual on Delivery Handover
-Ensures that the commission ledger debit occurs **only when the `arrived_dropoff` $\rightarrow$ `delivered` transition succeeds** and the recipient OTP is verified.
+Ensures that the commission ledger debit occurs **only when the `arrived_dropoff` $\rightarrow$ `delivered` transition succeeds**, the recipient OTP is verified, and any required receiver fare collection has been recorded.
 
 To prevent concurrent financial operations from computing corrupt `balance_after` snapshots, the transaction **locks the courier's `rider_profiles` row** to serialize balance updates per courier. The state update and ledger debit are linked via an atomic CTE so that the ledger insert executes if and only if the delivery row update succeeds:
 
@@ -436,8 +496,10 @@ WHERE user_id = :rider_id
 FOR UPDATE;
 
 -- 2. Atomic CTE: Advance status to 'delivered' AND conditionally insert commission accrual
--- The CTE guarantees that commission_ledger is touched IF AND ONLY IF the delivery row
--- matched status = 'arrived_dropoff' and the unexpired, unused recipient OTP was validated.
+-- Enforces:
+-- a) Delivery status must be 'arrived_dropoff' and assigned to this courier
+-- b) Recipient OTP must be valid (matching HMAC hash), unexpired, unused, and not locked
+-- c) SERVER-SIDE PAYMENT GUARD: If payer_type = 'receiver', a valid recorded payment must exist in 'payments'
 WITH delivery_update AS (
     UPDATE deliveries
     SET status = 'delivered',
@@ -451,7 +513,16 @@ WITH delivery_update AS (
       AND verification_otp_expires_at > NOW()
       AND verification_otp_used_at IS NULL
       AND verification_otp_hash = :calculated_hmac_hash
-    RETURNING id, rider_id, commission_amount
+      AND (
+          payer_type != 'receiver' 
+          OR EXISTS (
+              SELECT 1 FROM payments p 
+              WHERE p.delivery_id = deliveries.id 
+                AND p.payment_type = 'delivery_fare' 
+                AND p.payment_status IN ('collected_cash_rider_confirmed', 'collected_unverified', 'verified')
+          )
+      )
+    RETURNING id, rider_id, commission_amount, payer_type
 ),
 ledger_insert AS (
     INSERT INTO commission_ledger (
@@ -498,7 +569,10 @@ FROM delivery_update du;
 --   a) Query current delivery state:
 --      - If status is already 'delivered': 
 --          ROLLBACK; return 200 OK (idempotent duplicate request; delivery already verified).
---      - If status is 'arrived_dropoff': OTP failed / expired / locked.
+--      - If status is 'arrived_dropoff' AND payer_type = 'receiver' AND NOT EXISTS (valid payment in payments):
+--          ROLLBACK; return 400 Bad Request: 'Payment collection must be recorded before completing delivery handover'.
+--          (NOTE: Verification attempt counter is NOT incremented for missing payment records).
+--      - If status is 'arrived_dropoff' AND OTP is invalid / expired / locked:
 --          Increment failed attempts counter:
 --          UPDATE deliveries 
 --          SET verification_attempts = verification_attempts + 1,

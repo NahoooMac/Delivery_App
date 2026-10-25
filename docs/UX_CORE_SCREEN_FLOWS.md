@@ -283,7 +283,7 @@ graph TD
 - **Purpose**: Verify physical recipient package handover.
 - **Fields**: 4-digit numeric recipient OTP.
 - **Validation**: Validated against cryptographic HMAC hash; max 5 failed attempts before lockout.
-- **Result**: Valid OTP updates status to `delivered`, records `delivered_at`, and triggers idempotent commission debit to `commission_ledger` with serialized courier balance updates.
+- **Result**: Valid OTP updates status to `delivered`, records `delivered_at`, and triggers idempotent commission debit to `commission_ledger` with serialized courier balance updates. The backend transaction strictly validates that if `payer_type = 'receiver'`, a valid payment record exists in `payments` before marking `delivered` or debiting commission.
 
 ### Screen R8: Return Verification Modal (4-Digit Return OTP)
 - **Purpose**: Securely confirm that an undelivered parcel was returned to the sender.
