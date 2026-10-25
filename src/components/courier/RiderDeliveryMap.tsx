@@ -13,8 +13,9 @@ interface RiderDeliveryMapProps {
   vehicleType: 'motorcycle' | 'bicycle';
 }
 
-const YANDEX_MAPS_KEY =
-  (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_YANDEX_MAPS_KEY || import.meta.env?.VITE_YANDEX_API_KEY)) ||
+const YANDEX_TILES_KEY =
+  (typeof import.meta !== 'undefined' &&
+    (import.meta.env?.VITE_YANDEX_TILES_KEY || import.meta.env?.VITE_YANDEX_MAPS_KEY)) ||
   '';
 
 const MAPBOX_TOKEN =
@@ -36,7 +37,7 @@ export const RiderDeliveryMap: React.FC<RiderDeliveryMapProps> = ({
   const destMarkerRef = useRef<L.Marker | null>(null);
 
   const [routeInfo, setRouteInfo] = useState<RouteResult | null>(null);
-  const mapProvider = YANDEX_MAPS_KEY ? 'yandex' : 'mapbox';
+  const mapProvider = YANDEX_TILES_KEY ? 'yandex' : 'mapbox';
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -55,8 +56,8 @@ export const RiderDeliveryMap: React.FC<RiderDeliveryMapProps> = ({
     let tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
     let attribution = '© <a href="https://carto.com/">CARTO</a> © OpenStreetMap';
 
-    if (mapProvider === 'yandex' && YANDEX_MAPS_KEY) {
-      tileUrl = `https://tiles.api-maps.yandex.ru/v1/tiles/?projection=wgs84_mercator&x={x}&y={y}&z={z}&apikey=${YANDEX_MAPS_KEY}`;
+    if (mapProvider === 'yandex' && YANDEX_TILES_KEY) {
+      tileUrl = `https://tiles.api-maps.yandex.ru/v1/tiles/?projection=wgs84_mercator&x={x}&y={y}&z={z}&l=map&apikey=${YANDEX_TILES_KEY}`;
       attribution = '© <a href="https://yandex.com/maps-api/startup" target="_blank">Yandex Maps API</a>';
     } else if (mapProvider === 'mapbox' && MAPBOX_TOKEN) {
       tileUrl = `https://api.mapbox.com/styles/v1/mapbox/navigation-day-v1/tiles/512/{z}/{x}/{y}@2x?access_token=${MAPBOX_TOKEN}`;

@@ -37,8 +37,9 @@ interface SearchResultItem {
   distanceKm?: number;
 }
 
-const YANDEX_MAPS_KEY =
-  (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_YANDEX_MAPS_KEY || import.meta.env?.VITE_YANDEX_API_KEY)) ||
+const YANDEX_TILES_KEY =
+  (typeof import.meta !== 'undefined' &&
+    (import.meta.env?.VITE_YANDEX_TILES_KEY || import.meta.env?.VITE_YANDEX_MAPS_KEY)) ||
   '';
 
 const MAPBOX_TOKEN =
@@ -112,13 +113,13 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     L.control.zoom({ position: 'topright' }).addTo(map);
 
     // Yandex Maps (Startup API) -> Mapbox Navigation Day -> Carto Voyager
-    const tileUrl = YANDEX_MAPS_KEY
-      ? `https://tiles.api-maps.yandex.ru/v1/tiles/?projection=wgs84_mercator&x={x}&y={y}&z={z}&apikey=${YANDEX_MAPS_KEY}`
+    const tileUrl = YANDEX_TILES_KEY
+      ? `https://tiles.api-maps.yandex.ru/v1/tiles/?projection=wgs84_mercator&x={x}&y={y}&z={z}&l=map&apikey=${YANDEX_TILES_KEY}`
       : MAPBOX_TOKEN
       ? `https://api.mapbox.com/styles/v1/mapbox/navigation-day-v1/tiles/512/{z}/{x}/{y}@2x?access_token=${MAPBOX_TOKEN}`
       : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
 
-    const attribution = YANDEX_MAPS_KEY
+    const attribution = YANDEX_TILES_KEY
       ? '© <a href="https://yandex.com/maps-api/startup" target="_blank">Yandex Maps API</a> © OpenStreetMap'
       : MAPBOX_TOKEN
       ? '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
@@ -126,8 +127,8 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
 
     const tileLayer = L.tileLayer(tileUrl, {
       attribution,
-      tileSize: MAPBOX_TOKEN && !YANDEX_MAPS_KEY ? 512 : 256,
-      zoomOffset: MAPBOX_TOKEN && !YANDEX_MAPS_KEY ? -1 : 0,
+      tileSize: MAPBOX_TOKEN && !YANDEX_TILES_KEY ? 512 : 256,
+      zoomOffset: MAPBOX_TOKEN && !YANDEX_TILES_KEY ? -1 : 0,
       maxZoom: 19,
     });
 
